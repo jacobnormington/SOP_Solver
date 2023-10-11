@@ -1,0 +1,19 @@
+NAME: prob.1.sop
+TYPE: SOP
+COMMENT: Received by N. Ascheuer / M. Juenger / G. Reinelt 
+DIMENSION: 11
+EDGE_WEIGHT_TYPE: EXPLICIT
+EDGE_WEIGHT_FORMAT: FULL_MATRIX 
+EDGE_WEIGHT_SECTION
+11
+ 0  1  2  3  2  2  2  3  3  2  1000000
+-1  0  1  2  6  6  6  7  7  6  1
+-1  1  0  1  7  7  7  8  8  7  2
+-1  2  1  0  8  8  8  9  9  8  3
+-1  6  7  8  0  7  7  8  8  7  2
+-1  6  7  8 -1  0  7  1  8  7  2
+-1  6  7  8 -1 -1  0  8  1  7  2
+-1  7  8  9 -1  1  8  0  9  8  3
+-1  7  8  9 -1  8  1 -1  0  8  3
+-1  6  7  8 -1 -1 -1 -1 -1  0  2
+-1 -1 -1 -1 -1 -1 -1 -1 -1 -1  0
