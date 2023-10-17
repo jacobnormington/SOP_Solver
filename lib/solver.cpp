@@ -1,23 +1,27 @@
 #include <iostream>
 #include <fstream>
-#include <stack>
 #include <sstream>
-#include <cmath>
-#include <chrono>
+#include <iomanip>
+#include <vector>
+//#include <queue>
+#include <deque>
+#include <stack>
+//#include <unordered_map>
+#include <unordered_set>
 #include <math.h>
+#include <cmath>
 #include <limits>
 #include <algorithm>
 #include <cstring>
 #include <numeric>
 #include <functional>
-#include <vector>
+#include <chrono>
 #include <thread>
-#include <queue>
-#include <deque>
 #include <mutex>
-#include <bits/stdc++.h>
-#include <unordered_map>
 #include <condition_variable>
+
+#include <boost/container/vector.hpp>
+#include <boost/dynamic_bitset.hpp>
 
 extern "C" {
     #include "LKH/LKHmain.h"
@@ -63,11 +67,11 @@ extern "C" {
     static vector<vector<edge>> hungarian_graph;    //graph in the format that the Hungarian algorithm requires
     static vector<vector<int>> outgoing_graph;
 
-    //static sop_state default_state;                 //state of the solver before enumeration begins
-    static vector<Hungarian> initial_hungarian_state;   //for each thread, the Hungarian solver as it began
+    static sop_state default_state;                 //state of a solver before the first node was taken
+    //static vector<Hungarian> initial_hungarian_state;   //for each thread, the Hungarian solver as it began
     static Hash_Map history_table(TABLE_SIZE);
-    //GLOBAL POOL
-    //LOCAL POOLS
+    static vector<path_node> global_pool;           //a global pool of nodes that haven't yet been processed by any thread
+    //local_pools
 
     static vector<int> best_solution;               //the lowest cost solution found so far in any thread
     static int best_cost = INT_MAX;                 //the cost of best_solution
@@ -78,7 +82,31 @@ extern "C" {
 
 
 ///////////Synchronization Variables/////
-    //pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;   //lock for best_solution and its cost
+    // pthread_mutex_t best_solution_lock = PTHREAD_MUTEX_INITIALIZER;   //lock for any updates to best_solution and its cost
+    // static mutex GPQ_lock, Split_lock;
+    // static mutex asssign_mutex;
+    // static mutex thread_load_mutex;
+    // static condition_variable Idel;
+    // static condition_variable Thread_Stop_Check;
+    // static condition_variable Resume_State;
+    // static vector<int> selected_orgin;
+    // static mutex Select_Mutex;
+    // static mutex Select_SharedMutex;
+    // static mutex Resume_Lock;
+    // static mutex launch_lck;
+
+    static atomic<bool> time_out (false);           //whether the instance has timed out
+    //static atomic<int> active_threads (0);
+    // static atomic<int> selected_thread (-1);
+    // static atomic<int> restart_cnt (0);
+    // static atomic<int> total_restarts (0);
+    // static atomic<unsigned> idle_counter (0);
+    // static atomic<size_t> resload_cnt (0);
+    // static atomic<bool> limit_insert (false);
+    // static atomic<bool> check_status_safe (true);
+    // static atomic<bool> resume_success (true);
+    // static atomic<bool> resume_check (false);
+    // static atomic<bool> exploit_init (false);
 /////////////////////////////////////////
 
 
@@ -250,14 +278,14 @@ void solver::transitive_redundancy() {
                 edge dependence_edge = st.back();
                 st.pop_back();
                 if(dependence_edge.src != i){
-                    hungarian_graph[dependence_edge.dest][i].weight = -1;
-                    hungarian_graph[i][dependence_edge.dest].weight = -1;
-                    expanded_nodes.insert(dependence_edge.dest);
+                    hungarian_graph[dependence_edge.dst][i].weight = -1;
+                    hungarian_graph[i][dependence_edge.dst].weight = -1;
+                    expanded_nodes.insert(dependence_edge.dst);
                 }
 
-                for(int dest : dependency_graph[dependence_edge.dest]){
+                for(int dest : dependency_graph[dependence_edge.dst]){
                     if(expanded_nodes.find(dest) == expanded_nodes.end()){
-                        st.push_back(edge(dependence_edge.dest,dest,-1));
+                        st.push_back(edge(dependence_edge.dst,dest,-1));
                         expanded_nodes.insert(dest);
                     }
                 }
@@ -275,14 +303,14 @@ void solver::transitive_redundancy() {
                 edge dependence_edge = st.back();
                 st.pop_back();
                 if(dependence_edge.src != i){
-                    hungarian_graph[i][dependence_edge.dest].weight = -1;
-                    hungarian_graph[dependence_edge.dest][i].weight = -1;
-                    expanded_nodes.insert(dependence_edge.dest);
+                    hungarian_graph[i][dependence_edge.dst].weight = -1;
+                    hungarian_graph[dependence_edge.dst][i].weight = -1;
+                    expanded_nodes.insert(dependence_edge.dst);
                 }
-                for(const edge& e : in_degree[dependence_edge.dest]){
-                    if(expanded_nodes.find(e.dest) == expanded_nodes.end()){
+                for(const edge& e : in_degree[dependence_edge.dst]){
+                    if(expanded_nodes.find(e.dst) == expanded_nodes.end()){
                         st.push_back(e);
-                        expanded_nodes.insert(e.dest);
+                        expanded_nodes.insert(e.dst);
                     }
                 }
             }
@@ -365,13 +393,13 @@ vector<int> solver::nearest_neighbor(vector<int>* partial_solution) {
     
     while (num < instance_size) {
         bool taken = false;
-        for (auto node: sorted_costgraph[current_node]) {
-            if (!visit_arr[node.dest] && !depCnt_arr[node.dest]) {
-                current_node = node.dest;
+        for (auto node: sorted_costgraph[current_node]) { //this is actually taking an edge, since each element of the cost graph is an edge
+            if (!visit_arr[node.dst] && !depCnt_arr[node.dst]) {
+                current_node = node.dst;
                 solution_cost += node.weight;
                 solution.push_back(current_node);
                 num++;
-                visit_arr[node.dest] = true;
+                visit_arr[node.dst] = true;
                 taken = true;
                 break;
             }
@@ -380,7 +408,7 @@ vector<int> solver::nearest_neighbor(vector<int>* partial_solution) {
             std::cout << "Error generating Nearest Neighbor Heuristic" << std::endl;
             std::cout << "current node is " << current_node << std::endl;
             for (auto node: sorted_costgraph[current_node]) {
-                cout << node.dest << "," << visit_arr[node.dest] << "," << depCnt_arr[node.dest] << endl;
+                cout << node.dst << "," << visit_arr[node.dst] << "," << depCnt_arr[node.dst] << endl;
             }
             exit(EXIT_FAILURE);
         }
@@ -421,7 +449,7 @@ vector<vector<int>> solver::get_cost_matrix(int max_edge_weight) {
     for (vector<edge> edge_list : hungarian_graph) {
         for (auto edge : edge_list) {
             int i = edge.src;
-            int k = edge.dest;
+            int k = edge.dst;
             int weight = edge.weight;
             if (weight != -1 && i != k) {
                 matrix[i][k] = weight * 2;
@@ -474,14 +502,14 @@ void solver::solve(string f_name, int thread_num) {
     problem_state.hungarian_solver = Hungarian(instance_size, max_edge_weight+1, get_cost_matrix(max_edge_weight+1));
     problem_state.hungarian_solver.start();
     problem_state.depCnt = vector<int>(instance_size,0);
-    problem_state.taken_arr = vector<int>(instance_size,0);
+    problem_state.taken_arr = boost::container::vector<bool>(instance_size,false);
 
     for (int i = 0; i < instance_size; i++) {
         for (unsigned k = 0; k < dependency_graph[i].size(); k++) {
             problem_state.depCnt[dependency_graph[i][k]]++;
         }
     }
-    // default_state = problem_state; //a copy of problem_state, since structs are passed by value
+    default_state = problem_state; //a copy of problem_state, since structs are passed by value
     std::cout << "Instance size is " << instance_size - 2 << std::endl;
 
     // thread_load = new load_stats [thread_total];
@@ -499,8 +527,8 @@ void solver::solve(string f_name, int thread_num) {
     // lp_time = vector<double>(thread_total,0);
     // proc_time = vector<vector<double>>(thread_total);
     // for (int i = 0; i < thread_total; i++) proc_time[i] = vector<double>(3,0);
-    // initial_hungstate = vector<Hungarian>(thread_total);
-    // for (int i = 0; i < thread_total; i++) initial_hungstate.push_back(default_state.hungarian_solver);
+    // initial_hungarian_state = vector<Hungarian>(thread_total);
+    // for (int i = 0; i < thread_total; i++) initial_hungarian_state.push_back(default_state.hungarian_solver);
     // steal_cnt = vector<int>(thread_total,0);
     // enumerated_nodes = vector<unsigned_long_64>(thread_total);
     // estimated_trimmed_percent = vector<unsigned long long>(thread_total,0);
@@ -508,7 +536,7 @@ void solver::solve(string f_name, int thread_num) {
     //if (enable_lkh) LKH_thread = thread(run_lkh);
 
     auto start_time = chrono::high_resolution_clock::now();
-    solve_parallel(thread_total,global_pool_size);
+    solve_parallel();
     auto end_time = chrono::high_resolution_clock::now();
 
     //if (enable_lkh) if (LKH_thread.joinable()) LKH_thread.join();
@@ -559,6 +587,293 @@ void solver::solve(string f_name, int thread_num) {
     return;
 }
 
+void solver::solve_parallel() {
+    //start_time_limit = std::chrono::system_clock::now();
+
+    vector<solver> solvers(thread_total);
+    deque<sop_state>* solver_container;
+    vector<thread> Thread_manager(thread_total);
+    //vector<int> ready_thread; //DEPRICATED
+
+
+
+    /* Begin splitting nodes of the enumeration tree until GPQ has reached a minimum size. */
+    vector<node> ready_list;
+    solver_container = new deque<sop_state>();
+
+    //Take the first node (this is the "virtual" node that is always taken first)
+    problem_state.current_path.push_back(0);
+    problem_state.taken_arr[0] = true;
+    for (int vertex : dependency_graph[0]) problem_state.depCnt[vertex]--;
+    for (int i = 0; i < instance_size; i++) {
+        if (!problem_state.depCnt[i] && !problem_state.taken_arr[i]) {
+            //Push vertices with 0 depCnt into the ready list, unless they are already taken
+            ready_list.push_back(node(i));
+        }
+    }
+    // problem_state.current_node_value = ULLONG_MAX; //for progress estimation
+    // unsigned long long child_node_value = -1; //each child's share of the tree
+    // int remainder = -1; //remainder to be split among the first children
+
+
+
+    //Process first generation of nodes (the ready list as defined above)
+    sop_state initial_state = problem_state;
+    // if (enable_progress_estimation)
+    // {
+    //     child_node_value = ULLONG_MAX / ready_list.size();
+    //     remainder = ULLONG_MAX % ready_list.size();
+    //     //cout << "Ready list: " << ready_list.size() << ", " << "child_node_value: " << child_node_value << ", " << "remainder: " << remainder << endl;
+    // }
+
+    int child_num = 0; //the arbitrary birth-order of children in the ready_list, used for progress estimation
+    for (auto node : ready_list) {
+        // if (enable_progress_estimation)
+        // {
+        //     if (child_num == 0)
+        //         initial_state.current_node_value = child_node_value + 1;
+        //     if (child_num == remainder)
+        //         initial_state.current_node_value = child_node_value;
+        // }
+
+        int taken_node = node.n;
+        int cur_node = initial_state.current_path.back();
+        initial_state.current_path.push_back(taken_node);
+        initial_state.taken_arr[taken_node] = true;
+        for (int vertex : dependency_graph[taken_node]) initial_state.depCnt[vertex]--;
+        initial_state.current_cost += cost_graph[cur_node][taken_node].weight;
+        
+        initial_state.hungarian_solver.fix_row(cur_node, taken_node);
+        initial_state.hungarian_solver.fix_column(taken_node, cur_node);
+        initial_state.hungarian_solver.solve_dynamic();
+        initial_state.lower_bound = initial_state.hungarian_solver.get_matching_cost()/2;
+        initial_state.origin_node = taken_node;
+
+        /* I DON'T KNOW WHAT THIS IS ACCOUNTING FOR */
+        if (pre_density != 0) solver_container->push_back(initial_state); //a copy, since sop_state is a struct, passed by value
+        else if (instance_size > thread_total) {
+            global_pool.push_back(path_node(initial_state.current_path, initial_state.lower_bound, initial_state.origin_node));
+            // GPQ.Unknown.push_back(path_node(initial_state.current_path,initial_state.originate,initial_state.load_info,-1, initial_state.current_node_value,
+            //                                    Active_Path(initial_state.cur_solution.size()),NULL));
+        }
+
+        initial_state.taken_arr[taken_node] = false;
+        for (int vertex : dependency_graph[taken_node]) initial_state.depCnt[vertex]++;
+        initial_state.current_cost -= cost_graph[cur_node][taken_node].weight;
+        initial_state.current_path.pop_back();
+        initial_state.hungarian_solver.undue_row(cur_node, taken_node);
+        initial_state.hungarian_solver.undue_column(taken_node, cur_node);
+
+        // if (enable_progress_estimation)
+        //     child_num++;
+    }
+
+
+
+    //for (int i = thread_total - 1; i >= 0; i--) ready_thread.push_back(i); //INVESTIGATE; seems to be unused
+
+    //Repeat split operation until enough nodes are produced, but every node must be of the same depth
+    while (global_pool.empty() && (solver_container->size() < (size_t)global_pool_size || split_level_check(solver_container))) {
+        //sort(solver_container->begin(),solver_container->end(),split_sort);
+        sop_state target = solver_container->front();
+        if (target.current_path.size() == (unsigned) (instance_size - 1)) break;
+        solver_container->pop_front();
+
+        ready_list.clear();
+        for (int i = instance_size-1; i >= 0; i--) {
+            if (!target.depCnt[i] && !target.taken_arr[i]) ready_list.push_back(node(i));
+        }
+        if (ready_list.empty()) //the instance is unsolveable if the ready_list is ever empty
+        {
+            std::cout << "Precedence Constraints are Unsatisfiable" << std::endl;
+            std::cout << "Current path: ";
+            for (auto node : target.current_path) std::cout << node << " ";
+            std::cout << std::endl;
+            std::cout << "Ready List is Empty." << std::endl;
+            exit(EXIT_SUCCESS);
+        }
+
+        // if (enable_progress_estimation)
+        // {
+        //     child_node_value = target.current_node_value / ready_list.size();
+        //     remainder = target.current_node_value % ready_list.size();
+        //     child_num = 0; //reset counter
+        //     //cout << "Ready list: " << ready_list.size() << ", " << "child_node_value: " << child_node_value << ", " << "remainder: " << remainder << endl;
+        // }
+            
+        for (auto node : ready_list) {
+            // if (enable_progress_estimation)
+            // {
+            //     if (child_num == 0)
+            //         target.current_node_value = child_node_value + 1;
+            //     if (child_num == remainder)
+            //         target.current_node_value = child_node_value;
+            // }
+            // cout << target.current_node_value << " / " << child_node_value << endl;
+            
+            //Push split node back into GPQ
+            int taken_node = node.n;
+            int cur_node = target.current_path.back();
+            target.current_path.push_back(taken_node);
+            target.taken_arr[taken_node] = true;
+            for (int vertex : dependency_graph[taken_node]) target.depCnt[vertex]--;
+            target.current_cost += cost_graph[cur_node][taken_node].weight;
+            if (target.current_path.size() == (size_t)instance_size && target.current_cost < best_cost) { //this shouldn't be possible
+                best_solution = target.current_path;
+                best_cost = target.current_cost;
+            }
+
+            if (target.current_cost < best_cost) {
+                target.hungarian_solver.fix_row(cur_node, taken_node);
+                target.hungarian_solver.fix_column(taken_node, cur_node);
+                target.hungarian_solver.solve_dynamic();
+                target.lower_bound = target.hungarian_solver.get_matching_cost()/2;
+                solver_container->push_back(target);
+                target.hungarian_solver.undue_row(cur_node, taken_node);
+                target.hungarian_solver.undue_column(taken_node, cur_node);
+            }
+            // else //prune node due to backtracking
+            // {
+            //     if (enable_progress_estimation)
+            //         estimated_trimmed_percent[0] += target.current_node_value;
+            // }
+
+            target.current_cost -= cost_graph[cur_node][taken_node].weight;
+            for (int vertex : dependency_graph[taken_node]) target.depCnt[vertex]++;
+            target.taken_arr[taken_node] = false;
+            target.current_path.pop_back();
+
+            // if (enable_progress_estimation)
+            //     child_num++;
+        }
+
+    }
+
+    if (global_pool.empty()) {
+        for (auto problem : *solver_container) {
+            global_pool.push_back(path_node(problem.current_path,problem.lower_bound, problem.origin_node));
+        }
+    }
+    sort(global_pool.begin(),global_pool.end(),global_pool_sort);
+    delete solver_container;
+    /* End Splitting Operation */
+
+    //cout << "GPQ initial depth is " << GPQ.back().cur_solution.size() << endl;
+    //cout << "Initial GPQ size is " << GPQ.Unknown.size() << endl;
+    //calculate_standard_deviation();
+    for (int i = 0; i < global_pool.size(); i++)
+    {
+        std::cout << global_pool[i].lower_bound << " ";
+    }
+    std::cout << std::endl; 
+    exit(EXIT_SUCCESS);
+
+
+
+    /* Assign subproblems from the GPQ into solvers for each thread. */
+    int thread_cnt = 0;
+    boost::container::vector<bool> origin_taken_arr = boost::container::vector<bool>(instance_size,false);
+    while (thread_cnt < thread_total) { //continue, even taking duplicates from the same origin, in order to get work for every thread
+        fill(origin_taken_arr.begin(),origin_taken_arr.end(),false); //to more evenly distribute work, only one child of each of the first generation should be taken
+        for (int i = 0; i < global_pool.size(); i++) { 
+            if (thread_cnt >= thread_total) break;
+            unsigned origin = global_pool[i].origin_node;
+
+            if (!origin_taken_arr[origin]) {
+                path_node problem = global_pool[i];
+                global_pool.erase(global_pool.begin()+i);
+                solvers[thread_cnt].problem_state = generate_solver_state(problem);
+
+                solvers[thread_cnt].problem_state = default_state;
+                int taken_node = -1;
+                int cur_node = problem.sequence.front();
+                int size = problem.sequence.size();
+                solvers[thread_cnt].problem_state.current_path.push_back(0);
+                solvers[thread_cnt].problem_state.taken_arr[cur_node] = true;
+                for (int vertex : dependency_graph[cur_node]) solvers[thread_cnt].problem_state.depCnt[vertex]--;
+
+                for (int k = 1; k < size; k++) { //begin after the first, trivial, node
+                    taken_node = problem.sequence[k];
+                    solvers[thread_cnt].problem_state.current_path.push_back(taken_node);
+                    solvers[thread_cnt].problem_state.taken_arr[taken_node] = true;
+                    for (int vertex : dependency_graph[taken_node]) solvers[thread_cnt].problem_state.depCnt[vertex]--;
+                    solvers[thread_cnt].problem_state.current_cost += cost_graph[cur_node][taken_node].weight;
+                    solvers[thread_cnt].problem_state.hungarian_solver.fix_row(cur_node, taken_node);
+                    solvers[thread_cnt].problem_state.hungarian_solver.fix_column(taken_node, cur_node);
+                }
+
+                solvers[thread_cnt].problem_state.origin_node = problem.origin_node;
+                solvers[thread_cnt].problem_state.lower_bound = problem.lower_bound;
+                // solvers[thread_cnt].problem_state.initial_depth = solvers[thread_cnt].problem_state.cur_solution.size();
+                // solvers[thread_cnt].problem_state.current_node_value = problem.current_node_value; //for progress estimation
+
+                solvers[thread_cnt].thread_id = thread_cnt;
+                solvers[thread_cnt].instance_size = instance_size;
+                // solvers[thread_cnt].lb_curlv = problem.lower_bound;
+                // solvers[thread_cnt].cur_active_tree = Active_Path(solvers[thread_cnt].problem_state.cur_solution.size());
+                // solvers[thread_cnt].cur_active_tree.set_threadID(thread_cnt, thread_total);
+                
+                // solvers[thread_cnt].local_pool = new deque<path_node>();
+                // glp[thread_cnt].local_pool = solvers[thread_cnt].local_pool;
+
+                // thread_load[thread_cnt].cur_sol = &solvers[thread_cnt].problem_state.cur_solution;
+                
+                boost::dynamic_bitset<> bit_vector(instance_size, false);
+                for (auto node : solvers[thread_cnt].problem_state.current_path) {
+                    bit_vector[node] = true;
+                }
+                int last_element = solvers[thread_cnt].problem_state.current_path.back();
+                solvers[thread_cnt].problem_state.history_key = make_pair(bit_vector,last_element);
+
+                thread_cnt++;
+                origin_taken_arr[origin] = true;
+            }
+        }
+    }
+
+    // time_point = chrono::high_resolution_clock::now();
+
+    for (int i = 0; i < thread_total; i++) {
+        Thread_manager[i] = thread(&solver::enumerate,move(solvers[i]));
+        //active_threads++;
+    }
+
+    for (int i = 0; i < thread_total; i++) { //waits until every thread is finished
+        if (Thread_manager[i].joinable()) {
+            Thread_manager[i].join();
+            // delete solvers[i].local_pool;
+            // ready_thread.push_back(i);
+        }
+    }
+    //active_threads = 0;
+
+    //BB_Complete = true;
+
+    if (time_out) cout << "instance timed out " << endl;
+
+    // if (time_out || (GPQ.Unknown.empty() && GPQ.Abandoned.empty())) {
+    //     delete thread_load;
+    //     return;
+    // }
+
+    return;
+}
+
+void solver::enumerate() {
+    //
+}
+
+bool solver::split_level_check(deque<sop_state>* solver_container) {
+    // unsigned target_level = solver_container->front().current_path.size();
+    // for (auto node : *solver_container) {
+    //     if (node.current_path.size() != target_level) return true;
+    // }
+    // return false;
+    //this is unnecessary
+    //Since nodes are only added to the back, and only taken from the front, you can just check the front vs. back in constant time
+    return solver_container->front().current_path.size() != solver_container->back().current_path.size();
+}
+
 // void solver::run_lkh() {
 //     while(!BB_Complete) {
 //         LKH(&filename[0],initial_LKHRun);
@@ -570,10 +885,33 @@ void solver::solve(string f_name, int thread_num) {
 //     return;
 // }
 
-void solve_parallel(int thread_num, int pool_size) {
-    
-}
+/*sop_state solver::generate_solver_state(path_node& subproblem) {
+    sop_state state = default_state;
 
+    int cur_node = subproblem.sequence.front();
+    int taken_node = -1;
+    int size = subproblem.sequence.size();
+    state.current_path.push_back(0);
+    state.taken_arr[cur_node] = true;
+    for (int vertex : dependency_graph[cur_node]) state.depCnt[vertex]--;
+
+    for (int k = 1; k < size; k++) { //begin after the first, trivial, node
+        taken_node = subproblem.sequence[k];
+        state.current_path.push_back(taken_node);
+        state.taken_arr[taken_node] = true;
+        for (int vertex : dependency_graph[taken_node]) state.depCnt[vertex]--;
+        state.current_cost += cost_graph[cur_node][taken_node].weight;
+        state.hungarian_solver.fix_row(cur_node, taken_node);
+        state.hungarian_solver.fix_column(taken_node, cur_node);
+    }
+    
+    state.origin_node = subproblem.origin_node;
+    state.lower_bound = subproblem.lower_bound;
+    // solvers[thread_cnt].problem_state.initial_depth = solvers[thread_cnt].problem_state.cur_solution.size();
+    // solvers[thread_cnt].problem_state.current_node_value = problem.current_node_value; //for progress estimation
+
+    return state;
+}*/
 
 
 
@@ -647,26 +985,29 @@ void solver::push_to_historytable(pair<boost::dynamic_bitset<>,int>& key,int low
 
 //Compare two edges in the cost graph, a and b by their weight. a > b (therefore "better"), if a.weight < b.weight
 bool compare_edge(const edge a, const edge b) { return a.weight < b.weight; }
+//sort by increasing lower bound
+bool global_pool_sort(const path_node& src, const path_node& dest) { return src.lower_bound > dest.lower_bound; }
+//sort by increasing lower bound
+bool local_pool_sort(const path_node& src, const path_node& dest)  { return src.lower_bound > dest.lower_bound; }
 
-bool split_sort(const sop_state& src, const sop_state& dest) {
-    if (src.cur_solution.size() == dest.cur_solution.size()) return src.load_info < dest.load_info;
-    return src.cur_solution.size() < dest.cur_solution.size();
-}
-bool GPQ_sort(const instrct_node& src, const instrct_node& dest) {
-    return src.load_info > dest.load_info;
-}
-bool shared_pool_sort(const instrct_node& src, const instrct_node& dest) {
-    if (src.sequence.size() == dest.sequence.size()) return src.load_info > dest.load_info;
-    return src.sequence.size() < dest.sequence.size();
-}
-bool local_sort(const instrct_node& src, const instrct_node& dest) {
-    return src.load_info > dest.load_info;
-}
-bool bound_sort(const node& src,const node& dest) {
-    if (src.lb == dest.lb) return src.nc > dest.nc;
-    return src.lb > dest.lb;
-}
-bool nearest_sort(const node& src,const node& dest) {
-    if (src.nc == dest.nc) return src.lb > dest.lb;
-    return src.nc > dest.nc;
-}
+
+
+
+
+// bool shared_pool_sort(const path_node& src, const path_node& dest) {
+//     if (src.sequence.size() == dest.sequence.size()) return src.lower_bound > dest.lower_bound;
+//     return src.sequence.size() < dest.sequence.size();
+// }
+// bool bound_sort(const node& src,const node& dest) {
+//     if (src.lb == dest.lb) return src.nc > dest.nc;
+//     return src.lb > dest.lb;
+// }
+// bool nearest_sort(const node& src,const node& dest) {
+//     if (src.nc == dest.nc) return src.lb > dest.lb;
+//     return src.nc > dest.nc;
+// }
+//DEPRICATED; you don't need to sort the GPQ during splitting since the order doesn't matter yet, you have to split evenly so all nodes are of equal depth
+// bool split_sort(const sop_state& src, const sop_state& dest) {
+//     if (src.current_path.size() == dest.cur_solution.size()) return src.load_info < dest.load_info;
+//     return src.cur_solution.size() < dest.cur_solution.size();
+// }
