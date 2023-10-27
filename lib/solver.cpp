@@ -185,281 +185,6 @@ void solver::assign_parameter(vector<string> setting) {
     return;
 }
 
-void solver::retrieve_input() {
-    ifstream inFile;
-    string line;
-
-    // string fd_name;
-    // for (unsigned i = 0; i < filename.size(); i++) {
-    //     if (i == filename.size() - 4) break;
-    //     fd_name += filename[i];
-    // }
-    // fd_name += "_BB.sop";
-
-    //inFile.open(fd_name);
-    inFile.open(filename);
-    if (inFile.fail()) {
-        cerr << "Error: input file " << filename << " -> " << strerror(errno) << endl;
-        exit(EXIT_FAILURE);
-    }
-    else cout << "Input file is " << filename << endl;
-
-    //Read input one line at a time, storing the matrix
-    vector<vector<int>> file_matrix;
-    vector<int> file_line;
-    bool edge_weight_section = false;
-    while (getline(inFile,line)) {
-        if (line == "EDGE_WEIGHT_SECTION") { //skip unnecessary headers
-            edge_weight_section = true;
-
-            //read the dimension line 
-            getline(inFile,line);
-            instance_size = stoi(line);
-        }
-        else if (edge_weight_section) { //read cost/precedence matrix
-            stringstream sstream;
-            sstream << line;
-            string weight;
-            int weight_num;
-            while (sstream >> weight) {
-                stringstream(weight) >> weight_num;
-                file_line.push_back(weight_num);
-            }
-            file_matrix.push_back(file_line);
-            file_line.clear();
-        }
-    }
-
-    if (instance_size != int(file_matrix.size())) {
-        cerr << "Error: Instance Size Ambiguous. Expected " << instance_size << ". Was " << file_matrix.size() << endl;
-        exit(EXIT_FAILURE);
-    }
-
-    cost_graph = vector<vector<edge>>(instance_size);
-    hungarian_graph = vector<vector<edge>>(instance_size);
-    dependency_graph = vector<vector<int>>(instance_size);
-
-    for (int i = 0; i < (int)file_matrix.size(); i++) {
-        int j = 0;
-        for (auto edge_weight: file_matrix[i]) {
-            if (edge_weight < 0) {
-                cost_graph[i].push_back(edge(i,j,file_matrix[j][i]));
-                hungarian_graph[i].push_back(edge(i,j,-1));
-                dependency_graph[j].push_back(i);
-            }
-            else { 
-                cost_graph[i].push_back(edge(i,j,edge_weight));
-                hungarian_graph[i].push_back(edge(i,j,edge_weight));
-            }
-            j++;
-        }
-    }
-
-    return;
-}
-
-void solver::transitive_redundancy() {
-    in_degree = std::vector<vector<edge>>(instance_size);
-    for (int i = 0; i < instance_size; i++) {
-        for (long unsigned int k = 0; k < dependency_graph[i].size(); k++) {
-            int c = dependency_graph[i][k];
-            in_degree[c].push_back(edge(i,c,hungarian_graph[i][c].weight));
-        }
-    }
-
-    for(int i = 0; i < instance_size; ++i) {
-        vector<edge> preceding_nodes;
-        for (int k = 0; k < (int)dependency_graph[i].size(); k++) preceding_nodes.push_back(edge(i,dependency_graph[i][k],-1));
-        unordered_set<int> expanded_nodes;
-        for(int j = 0; j < (int)preceding_nodes.size(); ++j){
-            vector<edge> st;
-            st.push_back(preceding_nodes[j]);
-            while(!st.empty()){
-                edge dependence_edge = st.back();
-                st.pop_back();
-                if(dependence_edge.src != i){
-                    hungarian_graph[dependence_edge.dst][i].weight = -1;
-                    hungarian_graph[i][dependence_edge.dst].weight = -1;
-                    expanded_nodes.insert(dependence_edge.dst);
-                }
-
-                for(int dest : dependency_graph[dependence_edge.dst]){
-                    if(expanded_nodes.find(dest) == expanded_nodes.end()){
-                        st.push_back(edge(dependence_edge.dst,dest,-1));
-                        expanded_nodes.insert(dest);
-                    }
-                }
-            }
-        } 
-    }
-
-    for(int i = 0; i < instance_size; ++i) {
-        const vector<edge> preceding_nodes = in_degree[i];
-        unordered_set<int> expanded_nodes;
-        for(int j = 0; j < (int)preceding_nodes.size(); ++j){
-            vector<edge> st;
-            st.push_back(preceding_nodes[j]);
-            while(!st.empty()){
-                edge dependence_edge = st.back();
-                st.pop_back();
-                if(dependence_edge.src != i){
-                    hungarian_graph[i][dependence_edge.dst].weight = -1;
-                    hungarian_graph[dependence_edge.dst][i].weight = -1;
-                    expanded_nodes.insert(dependence_edge.dst);
-                }
-                for(const edge& e : in_degree[dependence_edge.dst]){
-                    if(expanded_nodes.find(e.dst) == expanded_nodes.end()){
-                        st.push_back(e);
-                        expanded_nodes.insert(e.dst);
-                    }
-                }
-            }
-        } 
-    }
-
-    return;
-}
-
-size_t solver::transitive_closure(vector<vector<int>>& isucc_graph) {
-    size_t node_num = 0;
-    deque<int> dfs_queue;
-    boost::dynamic_bitset<> taken_arr = boost::dynamic_bitset<>(instance_size);
-    boost::dynamic_bitset<> finished_arr = boost::dynamic_bitset<>(instance_size);
-    vector<boost::dynamic_bitset<>> transitive_closure_map = vector<boost::dynamic_bitset<>>(instance_size);
-    for (int i = 0; i < instance_size; i++) transitive_closure_map[i] = boost::dynamic_bitset<>(instance_size);
-    int selected_node = 0;
-
-    for (int i = 0; i < instance_size; i++) {
-        //cout << "current node is " << i << endl;
-        transitive_closure_map[i][i] = true;
-        dfs_queue.push_back(i);
-        while (!dfs_queue.empty()) {
-            selected_node = dfs_queue.back();
-            dfs_queue.pop_back();
-            for (int node : isucc_graph[selected_node]) {
-                if (!taken_arr[node]) {
-                    taken_arr[node] = true;
-                    dfs_queue.push_back(node);
-                }
-                if (!transitive_closure_map[i][node]) transitive_closure_map[i][node] = true;
-                if (!transitive_closure_map[node][i]) transitive_closure_map[node][i] = true;
-            }
-        }
-        taken_arr.reset();
-    }
-
-    for (int i = 0; i < instance_size; i++) {
-        for (int k = 0; k < instance_size; k++) {
-            if (transitive_closure_map[i][k]) node_num++;
-        }
-    }
-    //print_transitive_map();
-    return node_num;
-}
-
-// void solver::local_pool_config(float precedence_density) {
-//     //
-// }
-
-vector<int> solver::nearest_neighbor(vector<int>* partial_solution) {
-    vector<int> solution;
-    int current_node;
-    int solution_cost = 0;
-    bool visit_arr[instance_size];
-    int depCnt_arr[instance_size];
-    vector<vector<edge>> sorted_costgraph = cost_graph; 
-    sort_weight(sorted_costgraph);
-    memset(depCnt_arr,0,instance_size*sizeof(int));
-
-    for (int i = 0; i < instance_size; i++) {
-        visit_arr[i] = false;
-        for (long unsigned int k = 0; k < dependency_graph[i].size(); k++) {
-            depCnt_arr[dependency_graph[i][k]]++;
-        }
-    }
-
-    current_node = 0;
-    for (auto node : *partial_solution) {
-        visit_arr[node] = true;
-        for (long unsigned int i = 0; i < dependency_graph[node].size(); i++) {
-            depCnt_arr[dependency_graph[node][i]]--;
-        }
-        solution.push_back(node);
-        solution_cost += cost_graph[current_node][node].weight;
-        current_node = node;
-    }
-
-    int num = solution.size();
-    
-    while (num < instance_size) {
-        bool taken = false;
-        for (auto node: sorted_costgraph[current_node]) { //this is actually taking an edge, since each element of the cost graph is an edge
-            if (!visit_arr[node.dst] && !depCnt_arr[node.dst]) {
-                current_node = node.dst;
-                solution_cost += node.weight;
-                solution.push_back(current_node);
-                num++;
-                visit_arr[node.dst] = true;
-                taken = true;
-                break;
-            }
-        }
-        if (!taken) {
-            std::cout << "Error generating Nearest Neighbor Heuristic" << std::endl;
-            std::cout << "current node is " << current_node << std::endl;
-            for (auto node: sorted_costgraph[current_node]) {
-                cout << node.dst << "," << visit_arr[node.dst] << "," << depCnt_arr[node.dst] << endl;
-            }
-            exit(EXIT_FAILURE);
-        }
-        for (long unsigned int i = 0; i < dependency_graph[current_node].size(); i++) {
-            depCnt_arr[dependency_graph[current_node][i]]--;
-        }
-    }
-
-    best_cost = solution_cost;
-    return solution;
-}
-
-void solver::sort_weight(vector<vector<edge>>& graph) {
-    int size = graph.size();
-    for (int i = 0; i < size; i++) {
-        stable_sort(graph[i].begin(),graph[i].end(),compare_edge);
-    }
-    return;
-}
-
-int solver::get_maxedgeweight() {
-    int max = 0;
-    for (int i = 0; i < instance_size; i++) {
-        for (edge edge : cost_graph[i]) {
-            int weight = edge.weight;
-            if (weight > max) max = weight;
-        }
-    }
-    return max;
-}
-
-vector<vector<int>> solver::get_cost_matrix(int max_edge_weight) {
-    vector<vector<int>> matrix(instance_size);
-    for(int i = 0; i < instance_size; ++i){
-		matrix[i] = vector<int>(instance_size, max_edge_weight*2);
-	}
-
-    for (vector<edge> edge_list : hungarian_graph) {
-        for (auto edge : edge_list) {
-            int i = edge.src;
-            int k = edge.dst;
-            int weight = edge.weight;
-            if (weight != -1 && i != k) {
-                matrix[i][k] = weight * 2;
-            }
-        }
-    }
-
-    return matrix;
-}
-
 void solver::solve(string f_name, int thread_num) {
     if (thread_num < 1) {
         std::cerr << "Invalid Thread Number Input" << std::endl;
@@ -859,8 +584,388 @@ void solver::solve_parallel() {
     return;
 }
 
-void solver::enumerate() {
-    //
+void solver::enumerate(){
+    if (time_out)
+        return;
+
+
+    path_node active_node;
+
+    while (local_pools.pop_from_active_list(thread_id, active_node)){
+        if(enumeration_pre_check)
+            continue;
+
+
+        
+        
+        // Check_Restart_Status(enumeration_list, curlocal_nodes);
+
+        // for (int vertex : dependent_graph[taken_node])
+        //     problem_state.depCnt[vertex]--;
+
+        // problem_state.cur_solution.push_back(taken_node);
+        // problem_state.taken_arr[taken_node] = 1;
+        // problem_state.suffix_cost = 0;
+
+        // HistoryNode *previous_hisnode = current_hisnode;
+        // current_hisnode = history_entry;
+
+        //take
+        int taken_node = active_node.sequence.back;
+        u = problem_state.cur_solution.back();
+        v = taken_node;
+        problem_state.hungarian_solver.fix_row(u, v);
+        problem_state.hungarian_solver.fix_column(v, u);
+        problem_state.cur_cost += cost_graph[u][v].weight;
+
+        for (int vertex : dependent_graph[taken_node]) problem_state.depCnt[vertex]--;
+
+        problem_state.cur_path.push_back(taken_node);
+        problem_state.taken_arr[taken_node] = 1;
+        problem_state.suffix_cost = 0;
+
+        // HistoryNode *previous_hisnode = current_hisnode;
+        // current_hisnode = history_entry;
+
+        enumerate();
+
+
+
+        //untake
+
+         current_hisnode = previous_hisnode;
+
+        for (int vertex : dependent_graph[taken_node]) problem_state.depCnt[vertex]++;
+        problem_state.taken_arr[taken_node] = 0;
+        problem_state.cur_solution.pop_back();
+        problem_state.cur_cost -= cost_graph[u][v].weight;
+        problem_state.hungarian_solver.undue_row(u,v);
+        problem_state.hungarian_solver.undue_column(v,u);
+        problem_state.key.first[taken_node] = false;
+        problem_state.key.second = problem_state.cur_solution.back();
+
+
+        if (thread_id == 0){
+            auto cur_time = std::chrono::system_clock::now();
+            if (std::chrono::duration<double>(cur_time - start_time_limit).count() > t_limit){
+                time_out = true;
+                active_thread = 0;
+                return;
+            }
+        }
+    }
+
+
+if (local_pools.out_of_work(thread_id))
+    workload_request();
+
+
+return;
+}
+
+void solver::retrieve_input() {
+    ifstream inFile;
+    string line;
+
+    // string fd_name;
+    // for (unsigned i = 0; i < filename.size(); i++) {
+    //     if (i == filename.size() - 4) break;
+    //     fd_name += filename[i];
+    // }
+    // fd_name += "_BB.sop";
+
+    //inFile.open(fd_name);
+    inFile.open(filename);
+    if (inFile.fail()) {
+        cerr << "Error: input file " << filename << " -> " << strerror(errno) << endl;
+        exit(EXIT_FAILURE);
+    }
+    else cout << "Input file is " << filename << endl;
+
+    //Read input one line at a time, storing the matrix
+    vector<vector<int>> file_matrix;
+    vector<int> file_line;
+    bool edge_weight_section = false;
+    while (getline(inFile,line)) {
+        if (line == "EDGE_WEIGHT_SECTION") { //skip unnecessary headers
+            edge_weight_section = true;
+
+            //read the dimension line 
+            getline(inFile,line);
+            instance_size = stoi(line);
+        }
+        else if (edge_weight_section) { //read cost/precedence matrix
+            stringstream sstream;
+            sstream << line;
+            string weight;
+            int weight_num;
+            while (sstream >> weight) {
+                stringstream(weight) >> weight_num;
+                file_line.push_back(weight_num);
+            }
+            file_matrix.push_back(file_line);
+            file_line.clear();
+        }
+    }
+
+    if (instance_size != int(file_matrix.size())) {
+        cerr << "Error: Instance Size Ambiguous. Expected " << instance_size << ". Was " << file_matrix.size() << endl;
+        exit(EXIT_FAILURE);
+    }
+
+    cost_graph = vector<vector<edge>>(instance_size);
+    hungarian_graph = vector<vector<edge>>(instance_size);
+    dependency_graph = vector<vector<int>>(instance_size);
+
+    for (int i = 0; i < (int)file_matrix.size(); i++) {
+        int j = 0;
+        for (auto edge_weight: file_matrix[i]) {
+            if (edge_weight < 0) {
+                cost_graph[i].push_back(edge(i,j,file_matrix[j][i]));
+                hungarian_graph[i].push_back(edge(i,j,-1));
+                dependency_graph[j].push_back(i);
+            }
+            else { 
+                cost_graph[i].push_back(edge(i,j,edge_weight));
+                hungarian_graph[i].push_back(edge(i,j,edge_weight));
+            }
+            j++;
+        }
+    }
+
+    return;
+}
+
+void solver::transitive_redundancy() {
+    in_degree = std::vector<vector<edge>>(instance_size);
+    for (int i = 0; i < instance_size; i++) {
+        for (long unsigned int k = 0; k < dependency_graph[i].size(); k++) {
+            int c = dependency_graph[i][k];
+            in_degree[c].push_back(edge(i,c,hungarian_graph[i][c].weight));
+        }
+    }
+
+    for(int i = 0; i < instance_size; ++i) {
+        vector<edge> preceding_nodes;
+        for (int k = 0; k < (int)dependency_graph[i].size(); k++) preceding_nodes.push_back(edge(i,dependency_graph[i][k],-1));
+        unordered_set<int> expanded_nodes;
+        for(int j = 0; j < (int)preceding_nodes.size(); ++j){
+            vector<edge> st;
+            st.push_back(preceding_nodes[j]);
+            while(!st.empty()){
+                edge dependence_edge = st.back();
+                st.pop_back();
+                if(dependence_edge.src != i){
+                    hungarian_graph[dependence_edge.dst][i].weight = -1;
+                    hungarian_graph[i][dependence_edge.dst].weight = -1;
+                    expanded_nodes.insert(dependence_edge.dst);
+                }
+
+                for(int dest : dependency_graph[dependence_edge.dst]){
+                    if(expanded_nodes.find(dest) == expanded_nodes.end()){
+                        st.push_back(edge(dependence_edge.dst,dest,-1));
+                        expanded_nodes.insert(dest);
+                    }
+                }
+            }
+        } 
+    }
+
+    for(int i = 0; i < instance_size; ++i) {
+        const vector<edge> preceding_nodes = in_degree[i];
+        unordered_set<int> expanded_nodes;
+        for(int j = 0; j < (int)preceding_nodes.size(); ++j){
+            vector<edge> st;
+            st.push_back(preceding_nodes[j]);
+            while(!st.empty()){
+                edge dependence_edge = st.back();
+                st.pop_back();
+                if(dependence_edge.src != i){
+                    hungarian_graph[i][dependence_edge.dst].weight = -1;
+                    hungarian_graph[dependence_edge.dst][i].weight = -1;
+                    expanded_nodes.insert(dependence_edge.dst);
+                }
+                for(const edge& e : in_degree[dependence_edge.dst]){
+                    if(expanded_nodes.find(e.dst) == expanded_nodes.end()){
+                        st.push_back(e);
+                        expanded_nodes.insert(e.dst);
+                    }
+                }
+            }
+        } 
+    }
+
+    return;
+}
+
+size_t solver::transitive_closure(vector<vector<int>>& isucc_graph) {
+    size_t node_num = 0;
+    deque<int> dfs_queue;
+    boost::dynamic_bitset<> taken_arr = boost::dynamic_bitset<>(instance_size);
+    boost::dynamic_bitset<> finished_arr = boost::dynamic_bitset<>(instance_size);
+    vector<boost::dynamic_bitset<>> transitive_closure_map = vector<boost::dynamic_bitset<>>(instance_size);
+    for (int i = 0; i < instance_size; i++) transitive_closure_map[i] = boost::dynamic_bitset<>(instance_size);
+    int selected_node = 0;
+
+    for (int i = 0; i < instance_size; i++) {
+        //cout << "current node is " << i << endl;
+        transitive_closure_map[i][i] = true;
+        dfs_queue.push_back(i);
+        while (!dfs_queue.empty()) {
+            selected_node = dfs_queue.back();
+            dfs_queue.pop_back();
+            for (int node : isucc_graph[selected_node]) {
+                if (!taken_arr[node]) {
+                    taken_arr[node] = true;
+                    dfs_queue.push_back(node);
+                }
+                if (!transitive_closure_map[i][node]) transitive_closure_map[i][node] = true;
+                if (!transitive_closure_map[node][i]) transitive_closure_map[node][i] = true;
+            }
+        }
+        taken_arr.reset();
+    }
+
+    for (int i = 0; i < instance_size; i++) {
+        for (int k = 0; k < instance_size; k++) {
+            if (transitive_closure_map[i][k]) node_num++;
+        }
+    }
+    //print_transitive_map();
+    return node_num;
+}
+
+// void solver::local_pool_config(float precedence_density) {
+//     //
+// }
+
+vector<int> solver::nearest_neighbor(vector<int>* partial_solution) {
+    vector<int> solution;
+    int current_node;
+    int solution_cost = 0;
+    bool visit_arr[instance_size];
+    int depCnt_arr[instance_size];
+    vector<vector<edge>> sorted_costgraph = cost_graph; 
+    sort_weight(sorted_costgraph);
+    memset(depCnt_arr,0,instance_size*sizeof(int));
+
+    for (int i = 0; i < instance_size; i++) {
+        visit_arr[i] = false;
+        for (long unsigned int k = 0; k < dependency_graph[i].size(); k++) {
+            depCnt_arr[dependency_graph[i][k]]++;
+        }
+    }
+
+    current_node = 0;
+    for (auto node : *partial_solution) {
+        visit_arr[node] = true;
+        for (long unsigned int i = 0; i < dependency_graph[node].size(); i++) {
+            depCnt_arr[dependency_graph[node][i]]--;
+        }
+        solution.push_back(node);
+        solution_cost += cost_graph[current_node][node].weight;
+        current_node = node;
+    }
+
+    int num = solution.size();
+    
+    while (num < instance_size) {
+        bool taken = false;
+        for (auto node: sorted_costgraph[current_node]) { //this is actually taking an edge, since each element of the cost graph is an edge
+            if (!visit_arr[node.dst] && !depCnt_arr[node.dst]) {
+                current_node = node.dst;
+                solution_cost += node.weight;
+                solution.push_back(current_node);
+                num++;
+                visit_arr[node.dst] = true;
+                taken = true;
+                break;
+            }
+        }
+        if (!taken) {
+            std::cout << "Error generating Nearest Neighbor Heuristic" << std::endl;
+            std::cout << "current node is " << current_node << std::endl;
+            for (auto node: sorted_costgraph[current_node]) {
+                cout << node.dst << "," << visit_arr[node.dst] << "," << depCnt_arr[node.dst] << endl;
+            }
+            exit(EXIT_FAILURE);
+        }
+        for (long unsigned int i = 0; i < dependency_graph[current_node].size(); i++) {
+            depCnt_arr[dependency_graph[current_node][i]]--;
+        }
+    }
+
+    best_cost = solution_cost;
+    return solution;
+}
+
+void solver::sort_weight(vector<vector<edge>>& graph) {
+    int size = graph.size();
+    for (int i = 0; i < size; i++) {
+        stable_sort(graph[i].begin(),graph[i].end(),compare_edge);
+    }
+    return;
+}
+
+int solver::get_maxedgeweight() {
+    int max = 0;
+    for (int i = 0; i < instance_size; i++) {
+        for (edge edge : cost_graph[i]) {
+            int weight = edge.weight;
+            if (weight > max) max = weight;
+        }
+    }
+    return max;
+}
+
+vector<vector<int>> solver::get_cost_matrix(int max_edge_weight) {
+    vector<vector<int>> matrix(instance_size);
+    for(int i = 0; i < instance_size; ++i){
+		matrix[i] = vector<int>(instance_size, max_edge_weight*2);
+	}
+
+    for (vector<edge> edge_list : hungarian_graph) {
+        for (auto edge : edge_list) {
+            int i = edge.src;
+            int k = edge.dst;
+            int weight = edge.weight;
+            if (weight != -1 && i != k) {
+                matrix[i][k] = weight * 2;
+            }
+        }
+    }
+
+    return matrix;
+}
+
+void solver::workload_request(){
+    // TODO: take from global pool
+    path_node new_node;
+
+
+    new_node = workstealing();
+
+    //TODO: setup new solver state
+    
+}
+
+path_node solver::workstealing(){
+    path_node stolen_node;
+    while(true){
+        int target_id = workstealing_next_target.get();
+        if(target_id == thread_id)
+            continue;
+        
+        if(local_pools.pop_from_zero_list(target_id, stolen_node))
+            break;
+    }
+
+    return stolen_node;
+}
+
+bool solver::enumeration_pre_check(path_node& active_node){//true on failure
+    //TODO: check lower bound stuff
+    return true;
 }
 
 bool solver::split_level_check(deque<sop_state>* solver_container) {
