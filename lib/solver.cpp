@@ -71,7 +71,8 @@ extern "C" {
     //static vector<Hungarian> initial_hungarian_state;   //for each thread, the Hungarian solver as it began
     static Hash_Map history_table(TABLE_SIZE);
     static vector<path_node> global_pool;           //a global pool of nodes that haven't yet been processed by any thread
-    //local_pools
+    static local_pool local_pools*;                  //local_pools
+    
 
     static vector<int> best_solution;               //the lowest cost solution found so far in any thread
     static int best_cost = INT_MAX;                 //the cost of best_solution
@@ -238,7 +239,7 @@ void solver::solve(string f_name, int thread_num) {
     std::cout << "Instance size is " << instance_size - 2 << std::endl;
 
     // thread_load = new load_stats [thread_total];
-
+    local_pools = new local_pool(thread_total);
     history_table.set_up_mem(thread_total,instance_size);
 
     // abandon_wlk_array = vector<bool_64>(thread_total);
@@ -588,9 +589,67 @@ void solver::enumerate(){
     if (time_out)
         return;
 
+    deque<path_node> ready_list;
 
+    for(int node_id = 0; node_id < instance_size; node_id++){
+        if(!problem_state.depCnt[node_id] && !problem_state.taken_arr[node_id]){
+            
+
+            //triming
+            int src = problem_state.current_path.back();
+            problem_state.current_path.push_back(node_id);
+            problem_state.current_cost += cost_graph[src][node_id].weight;
+            int lower_bound = -1;
+            bool taken = false;
+            problem_state.history_key.first[node_id] = true;
+            problem_state.history_key.second = node_id;
+            HistoryNode* his_node = NULL;
+            Active_Node* active_node = NULL;
+
+            bool decision = HistoryUtilization(problem_state.history_key,&lower_bound,&taken,&his_node,problem_state.current_cost);
+                //enumerated_nodes[thread_id][problem_state.cur_solution.size()]++;
+
+            if (!taken) {
+                lower_bound = dynamic_hungarian(src,dest.n);
+                if (history_table.get_cur_size() < inhis_mem_limit * history_table.get_max_size()) push_to_historytable(problem_state.key,lower_bound,&his_node,false);
+                else limit_insertion = true;
+                problem_state.hungarian_solver.undue_row(src,dest.n);
+                problem_state.hungarian_solver.undue_column(dest.n,src);
+            }
+            else if (taken && !decision) {
+                problem_state.cur_solution.pop_back();
+                problem_state.cur_cost -= cost_graph[src][dest.n].weight;
+                problem_state.key.first[dest.n] = false;
+                problem_state.key.second = last_element;
+                continue;
+            }
+
+            if (lower_bound >= best_cost) {
+                if (his_node != NULL) {
+                    HistoryContent content = his_node->Entry.load();
+                    if (content.prefix_cost >= problem_state.cur_cost) his_node->explored = true;
+                }
+                problem_state.cur_solution.pop_back();
+                problem_state.cur_cost -= cost_graph[src][dest.n].weight;
+                problem_state.key.first[dest.n] = false;
+                problem_state.key.second = last_element;
+                continue;
+            }
+            //"good" node
+
+            path_node temp(problem_state.current_path, lower_bound, -1); //TODO: set orgin to the proper value
+            ready_list.push_back(temp);
+        }
+    }
+
+
+    //TODO: processing on the ready_list deque ie sorting
+
+
+
+    local_pools.push_list(ready_list);
+    
     path_node active_node;
-
     while (local_pools.pop_from_active_list(thread_id, active_node)){
         if(enumeration_pre_check)
             continue;
