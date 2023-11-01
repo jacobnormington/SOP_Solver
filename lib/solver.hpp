@@ -69,7 +69,7 @@
     class path_node {
         public:
             vector<int> sequence;       //the partial path represented by this node in the enumeration tree
-            int lower_bound;            //the lower bound cost of a complete path beginning with sequence
+            int lower_bound = -1;       //the lower bound cost of a complete path beginning with sequence
             int origin_node = -1;       //the first node in this path, after the virtual starting node, used to evenly distribute threads between subspaces in solve_parallel
             // int parent_lv = -1;
             // bool* invalid_ptr = NULL; //investigate
@@ -79,6 +79,7 @@
             //Active_Path partial_active_path;
             //HistoryNode* root_his_node;
 
+            path_node () {}
             path_node (vector<int> partial_path, int lb, int origin) {
                 sequence = partial_path;
                 lower_bound = lb;
@@ -97,8 +98,7 @@
             // }
     };
 
-    class local_pool
-    {
+    class local_pool {
         public:
             /*Grabs a node from the shallowest / zero pool*/
             bool pop_from_zero_list(int thread_number, path_node &result_node){
@@ -162,13 +162,13 @@
             bool out_of_work(int thread_number){
                 return pools[thread_number].size() == 0;
             };
-            public local_pool(int thread_count){
-                locks = new vector<>(thread_count);
-                pools = new vector<>(thread_count);
+            local_pool(int thread_count){
+                locks = vector<spin_lock>(thread_count);
+                pools = vector<std::deque<std::deque<path_node>>>(thread_count);
             }
         private:
-            std::vector<spin_lock> locks*;
-            std::vector<std::deque<std::deque<path_node>>> pools*;
+            std::vector<spin_lock> locks;
+            std::vector<std::deque<std::deque<path_node>>> pools;
     };
 
     /* All the information necessary about the current node in the enumeration tree.
@@ -251,11 +251,26 @@
 
             /* Recursive function that each thread runs to process its assigned spaces of the enumeration tree, checking one node and then its children and their children, etc. */
             void enumerate();
+            /* */
+            bool enumeration_pre_check(path_node& active_node);
+
+            /* */
+            int dynamic_hungarian(int src, int dest);
+
+            /* */
+            bool history_utilization(pair<boost::dynamic_bitset<>,int>& key,int* lowerbound,bool* found,HistoryNode** entry, int cost);
+            /* */
+            void push_to_historytable(pair<boost::dynamic_bitset<>,int>& key,int lower_bound,HistoryNode** entry,bool backtracked);
 
             /* Build an sop_state based off the information in a path_node. */
             sop_state generate_solver_state(path_node& subproblem);
             /* Build a hungarian solver state based upon the problem_state. Used in generate_solver_state. */
             void regenerate_hungstate();
+
+            /* */
+            void solver::workload_request();
+            /* */
+            path_node solver::workstealing();
 
             /* Initialize local pools. */
             //void local_pool_config(float precedence_density);

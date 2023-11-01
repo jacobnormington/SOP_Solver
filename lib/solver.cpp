@@ -71,7 +71,7 @@ extern "C" {
     //static vector<Hungarian> initial_hungarian_state;   //for each thread, the Hungarian solver as it began
     static Hash_Map history_table(TABLE_SIZE);
     static vector<path_node> global_pool;           //a global pool of nodes that haven't yet been processed by any thread
-    static local_pool local_pools*;                  //local_pools
+    static local_pool* local_pools;                  //local_pools
     
 
     static vector<int> best_solution;               //the lowest cost solution found so far in any thread
@@ -586,10 +586,10 @@ void solver::solve_parallel() {
 }
 
 void solver::enumerate(){
-    if (time_out)
-        return;
+    if (time_out) return;
 
     deque<path_node> ready_list;
+    bool limit_insertion = false;
 
     for(int node_id = 0; node_id < instance_size; node_id++){
         if(!problem_state.depCnt[node_id] && !problem_state.taken_arr[node_id]){
@@ -606,39 +606,43 @@ void solver::enumerate(){
             HistoryNode* his_node = NULL;
             Active_Node* active_node = NULL;
 
-            bool decision = HistoryUtilization(problem_state.history_key,&lower_bound,&taken,&his_node,problem_state.current_cost);
+            bool decision = history_utilization(problem_state.history_key,&lower_bound,&taken,&his_node,problem_state.current_cost);
                 //enumerated_nodes[thread_id][problem_state.cur_solution.size()]++;
 
             if (!taken) {
-                lower_bound = dynamic_hungarian(src,dest.n);
-                if (history_table.get_cur_size() < inhis_mem_limit * history_table.get_max_size()) push_to_historytable(problem_state.key,lower_bound,&his_node,false);
+                lower_bound = dynamic_hungarian(src,node_id);
+                if (history_table.get_cur_size() < inhis_mem_limit * history_table.get_max_size()) push_to_historytable(problem_state.history_key,lower_bound,&his_node,false);
                 else limit_insertion = true;
-                problem_state.hungarian_solver.undue_row(src,dest.n);
-                problem_state.hungarian_solver.undue_column(dest.n,src);
+                problem_state.hungarian_solver.undue_row(src,node_id);
+                problem_state.hungarian_solver.undue_column(node_id,src);
             }
             else if (taken && !decision) {
-                problem_state.cur_solution.pop_back();
-                problem_state.cur_cost -= cost_graph[src][dest.n].weight;
-                problem_state.key.first[dest.n] = false;
-                problem_state.key.second = last_element;
+                problem_state.current_path.pop_back();          //TODO: add a prune function that does this
+                problem_state.current_cost -= cost_graph[src][node_id].weight;
+                problem_state.history_key.first[node_id] = false;
+                problem_state.history_key.second = src;
                 continue;
             }
 
             if (lower_bound >= best_cost) {
                 if (his_node != NULL) {
                     HistoryContent content = his_node->Entry.load();
-                    if (content.prefix_cost >= problem_state.cur_cost) his_node->explored = true;
+                    if (content.prefix_cost >= problem_state.current_cost) his_node->explored = true;
                 }
-                problem_state.cur_solution.pop_back();
-                problem_state.cur_cost -= cost_graph[src][dest.n].weight;
-                problem_state.key.first[dest.n] = false;
-                problem_state.key.second = last_element;
+                problem_state.current_path.pop_back();
+                problem_state.current_cost -= cost_graph[src][node_id].weight;
+                problem_state.history_key.first[node_id] = false;
+                problem_state.history_key.second = src;
                 continue;
             }
-            //"good" node
 
-            path_node temp(problem_state.current_path, lower_bound, -1); //TODO: set orgin to the proper value
+            //"good" node, add it to the ready_list, then reset problem state
+            path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node);
             ready_list.push_back(temp);
+            problem_state.current_path.pop_back();
+            problem_state.current_cost -= cost_graph[src][node_id].weight;
+            problem_state.history_key.first[node_id] = false;
+            problem_state.history_key.second = src;
         }
     }
 
@@ -646,65 +650,76 @@ void solver::enumerate(){
     //TODO: processing on the ready_list deque ie sorting
 
 
+    local_pools->push_list(thread_id, ready_list);
 
-    local_pools.push_list(ready_list);
+    //CheckStop_Request();
     
+    /* Begin enumeration. */
     path_node active_node;
-    while (local_pools.pop_from_active_list(thread_id, active_node)){
-        if(enumeration_pre_check)
-            continue;
+    while (local_pools->pop_from_active_list(thread_id, active_node)){
+        if(enumeration_pre_check(active_node)) continue;
 
-
-        
-        
         // Check_Restart_Status(enumeration_list, curlocal_nodes);
 
-        // for (int vertex : dependent_graph[taken_node])
-        //     problem_state.depCnt[vertex]--;
+        // if (abandon_share || abandon_work) { //should both be in enumeration_pre_check
+        //     curlocal_nodes.clear();
+        //     break;
+        // }
 
-        // problem_state.cur_solution.push_back(taken_node);
-        // problem_state.taken_arr[taken_node] = 1;
+        // if (!stop_init) {
+        //     Check_Local_Pool(enumeration_list,curlocal_nodes);
+        // }
+
+        // if (speed_search) {
+        //     for (unsigned i = 0; i < shared_lbstate[mg_id].size(); i++) {
+        //         shared_lbstate[mg_id][i].fix_row(u,v);
+        //         shared_lbstate[mg_id][i].fix_column(v,u);
+        //     }
+        // }
+
+        /* Take */
+        int src = problem_state.current_path.back();        //the number of the predecessor to the node being considered
+        int taken_node = active_node.sequence.back();       //this node's number
+        problem_state.current_path.push_back(taken_node);
+        problem_state.taken_arr[taken_node] = true;
+        problem_state.current_cost += cost_graph[src][taken_node].weight;
+        for (int vertex : dependency_graph[taken_node]) problem_state.depCnt[vertex]--;
+        problem_state.history_key.first[taken_node] = true;
+        problem_state.history_key.second = taken_node;
+        //problem_state.current_node_value = enumeration_list.back().current_node_value; //for progress estimation
+        problem_state.hungarian_solver.fix_row(src, taken_node);
+        problem_state.hungarian_solver.fix_column(taken_node, src);
+        // HistoryNode *previous_hisnode = current_hisnode;
+        // current_hisnode = history_entry;
         // problem_state.suffix_cost = 0;
 
-        // HistoryNode *previous_hisnode = current_hisnode;
-        // current_hisnode = history_entry;
 
-        //take
-        int taken_node = active_node.sequence.back;
-        u = problem_state.cur_solution.back();
-        v = taken_node;
-        problem_state.hungarian_solver.fix_row(u, v);
-        problem_state.hungarian_solver.fix_column(v, u);
-        problem_state.cur_cost += cost_graph[u][v].weight;
-
-        for (int vertex : dependent_graph[taken_node]) problem_state.depCnt[vertex]--;
-
-        problem_state.cur_path.push_back(taken_node);
-        problem_state.taken_arr[taken_node] = 1;
-        problem_state.suffix_cost = 0;
-
-        // HistoryNode *previous_hisnode = current_hisnode;
-        // current_hisnode = history_entry;
 
         enumerate();
 
 
 
-        //untake
+        /* Untake */
+        //current_hisnode = previous_hisnode;
+        //problem_state.suffix_cost????
+        problem_state.hungarian_solver.undue_row(src, taken_node);
+        problem_state.hungarian_solver.undue_column(taken_node, src);
+        problem_state.history_key.first[taken_node] = false;
+        problem_state.history_key.second = src;
+        for (int vertex : dependency_graph[taken_node]) problem_state.depCnt[vertex]++;
+        problem_state.current_cost -= cost_graph[src][taken_node].weight;
+        problem_state.taken_arr[taken_node] = false;
+        problem_state.current_path.pop_back();
 
-         current_hisnode = previous_hisnode;
-
-        for (int vertex : dependent_graph[taken_node]) problem_state.depCnt[vertex]++;
-        problem_state.taken_arr[taken_node] = 0;
-        problem_state.cur_solution.pop_back();
-        problem_state.cur_cost -= cost_graph[u][v].weight;
-        problem_state.hungarian_solver.undue_row(u,v);
-        problem_state.hungarian_solver.undue_column(v,u);
-        problem_state.key.first[taken_node] = false;
-        problem_state.key.second = problem_state.cur_solution.back();
+        // if (speed_search) {
+        //     for (unsigned i = 0; i < shared_lbstate[mg_id].size(); i++) {
+        //         shared_lbstate[mg_id][i].undue_row(u,v);
+        //         shared_lbstate[mg_id][i].undue_row(v,u);
+        //     }
+        // }
 
 
-        if (thread_id == 0){
+        if (thread_id == 0){ //check if out of time
             auto cur_time = std::chrono::system_clock::now();
             if (std::chrono::duration<double>(cur_time - start_time_limit).count() > t_limit){
                 time_out = true;
@@ -714,12 +729,10 @@ void solver::enumerate(){
         }
     }
 
+    if (local_pools->out_of_work(thread_id)) //TODO: consider the while(true) vs. a new call to enumerate, and recursion depth problems
+        workload_request();
 
-if (local_pools.out_of_work(thread_id))
-    workload_request();
-
-
-return;
+    return;
 }
 
 void solver::retrieve_input() {
@@ -1005,7 +1018,7 @@ void solver::workload_request(){
     new_node = workstealing();
 
     //TODO: setup new solver state
-    
+    //problem_state = generate_solver_state(new_node);
 }
 
 path_node solver::workstealing(){
