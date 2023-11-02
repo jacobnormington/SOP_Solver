@@ -28,16 +28,17 @@ extern "C" {
 }
 
 #include "solver.hpp"
-#include "hash.hpp"
-#include "precedence.hpp"
+#include "history_table.hpp"
+#include "local_pool.hpp"
+//#include "precedence.hpp"
 
-#define TABLE_SIZE 541065431
+#define TABLE_SIZE 541065431                        //number of buckets in the history table
 
 
 //////Runtime Parameters (Read Only)/////
     //from command line arguments
     static string filename;                         //name of the sop input file
-    static int thread_total = 0;                    //number of threads to use (not counting the LKH thread)
+    static int thread_total = 0;                    //number of threads to use for B&B enumeration (not counting the LKH thread)
 
     //from config file
     static int t_limit = 0;                         //time limit, in seconds
@@ -67,17 +68,17 @@ extern "C" {
     static vector<vector<edge>> hungarian_graph;    //graph in the format that the Hungarian algorithm requires
     static vector<vector<int>> outgoing_graph;
 
-    static sop_state default_state;                 //state of a solver before the first node was taken
+    static sop_state default_state;                     //state of a solver before the first node was taken
     //static vector<Hungarian> initial_hungarian_state;   //for each thread, the Hungarian solver as it began
-    static Hash_Map history_table(TABLE_SIZE);
-    static vector<path_node> global_pool;           //a global pool of nodes that haven't yet been processed by any thread
-    static local_pool* local_pools;                  //local_pools
+    static History_Table history_table(TABLE_SIZE);     //the history table
+    static vector<path_node> global_pool;               //a global pool of nodes that haven't yet been processed by any thread
+    static local_pool* local_pools;                     //each thread's local pool, with the internal tools to manage them
     
 
     static vector<int> best_solution;               //the lowest cost solution found so far in any thread
     static int best_cost = INT_MAX;                 //the cost of best_solution
 
-    // std::chrono::time_point<std::chrono::system_clock> start_time_limit;
+    std::chrono::time_point<std::chrono::system_clock> solver_start_time;  //when solve_parallel started (before processing begins, but after all the basic setup, file parsing, etc.)
     // std::chrono::time_point<std::chrono::system_clock> time_point;
 /////////////////////////////////////////
 
@@ -97,7 +98,7 @@ extern "C" {
     // static mutex launch_lck;
 
     static atomic<bool> time_out (false);           //whether the instance has timed out
-    //static atomic<int> active_threads (0);
+    static atomic<int> active_threads (0);          //the number of threads still working
     // static atomic<int> selected_thread (-1);
     // static atomic<int> restart_cnt (0);
     // static atomic<int> total_restarts (0);
@@ -112,7 +113,12 @@ extern "C" {
 
 
 ///////////Thread Stopping Variables/////
-    //
+    static deque<request_packet> request_buffer;    //
+    static mutex buffer_lock;                       //lock for accessing the request_buffer
+    // static mutex pause_lock;                       //
+    // static mutex ptselct_lock;                     //
+    static atomic<bool> stop_sig (false);           //if any threads are currently being requested to stop
+    static atomic<int> stop_cnt (0);                //how many threads should stop
 /////////////////////////////////////////
 
 
@@ -240,7 +246,7 @@ void solver::solve(string f_name, int thread_num) {
 
     // thread_load = new load_stats [thread_total];
     local_pools = new local_pool(thread_total);
-    history_table.set_up_mem(thread_total,instance_size);
+    history_table.initialize(thread_total);
 
     // abandon_wlk_array = vector<bool_64>(thread_total);
     // num_resume = vector<int_64>(thread_total);
@@ -314,7 +320,7 @@ void solver::solve(string f_name, int thread_num) {
 }
 
 void solver::solve_parallel() {
-    //start_time_limit = std::chrono::system_clock::now();
+    solver_start_time = std::chrono::system_clock::now();
 
     vector<solver> solvers(thread_total);
     deque<sop_state>* solver_container;
@@ -606,18 +612,20 @@ void solver::enumerate(){
             HistoryNode* his_node = NULL;
             Active_Node* active_node = NULL;
 
-            bool decision = history_utilization(problem_state.history_key,&lower_bound,&taken,&his_node,problem_state.current_cost);
-                //enumerated_nodes[thread_id][problem_state.cur_solution.size()]++;
+            bool decision = history_utilization(problem_state.history_key,problem_state.current_cost,&lower_bound,&taken,&his_node);
+            //enumerated_nodes[thread_id].val++;
 
-            if (!taken) {
+            if (!taken) { //if there is no similar entry in the history table
                 lower_bound = dynamic_hungarian(src,node_id);
-                if (history_table.get_cur_size() < inhis_mem_limit * history_table.get_max_size()) push_to_historytable(problem_state.history_key,lower_bound,&his_node,false);
+                if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size()) push_to_history_table(problem_state.history_key,lower_bound,&his_node,false);
                 else limit_insertion = true;
-                problem_state.hungarian_solver.undue_row(src,node_id);
-                problem_state.hungarian_solver.undue_column(node_id,src);
             }
-            else if (taken && !decision) {
-                problem_state.current_path.pop_back();          //TODO: add a prune function that does this
+            else if (taken && !decision) { //if this path is dominated by another path
+                //TODO: add a prune function that does all this
+                // if (enable_progress_estimation) //pruned due to history domination
+                //     estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming 
+
+                problem_state.current_path.pop_back();          
                 problem_state.current_cost -= cost_graph[src][node_id].weight;
                 problem_state.history_key.first[node_id] = false;
                 problem_state.history_key.second = src;
@@ -626,9 +634,13 @@ void solver::enumerate(){
 
             if (lower_bound >= best_cost) {
                 if (his_node != NULL) {
-                    HistoryContent content = his_node->Entry.load();
+                    HistoryContent content = his_node->entry.load();
                     if (content.prefix_cost >= problem_state.current_cost) his_node->explored = true;
                 }
+
+                // if (enable_progress_estimation) //track the size of the trimmed subtree
+                //     estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming
+
                 problem_state.current_path.pop_back();
                 problem_state.current_cost -= cost_graph[src][node_id].weight;
                 problem_state.history_key.first[node_id] = false;
@@ -721,9 +733,9 @@ void solver::enumerate(){
 
         if (thread_id == 0){ //check if out of time
             auto cur_time = std::chrono::system_clock::now();
-            if (std::chrono::duration<double>(cur_time - start_time_limit).count() > t_limit){
+            if (std::chrono::duration<double>(cur_time - solver_start_time).count() > t_limit){
                 time_out = true;
-                active_thread = 0;
+                active_threads = 0;
                 return;
             }
         }
@@ -1024,11 +1036,11 @@ void solver::workload_request(){
 path_node solver::workstealing(){
     path_node stolen_node;
     while(true){
-        int target_id = workstealing_next_target.get();
+        int target_id = local_pools->choose_victim(thread_id);
         if(target_id == thread_id)
             continue;
         
-        if(local_pools.pop_from_zero_list(target_id, stolen_node))
+        if(local_pools->pop_from_zero_list(target_id, stolen_node))
             break;
     }
 
@@ -1093,37 +1105,38 @@ bool solver::split_level_check(deque<sop_state>* solver_container) {
 
 
 
-int solver::dynamic_hungarian(int src, int dest) {
-    problem_state.hungarian_solver.fix_row(src, dest);
-	problem_state.hungarian_solver.fix_column(dest, src);
+int solver::dynamic_hungarian(int src, int dst) {
+    problem_state.hungarian_solver.fix_row(src, dst);
+	problem_state.hungarian_solver.fix_column(dst, src);
 	problem_state.hungarian_solver.solve_dynamic();
     //number_of_lb++;
-    return problem_state.hungarian_solver.get_matching_cost()/2;
+    int lb = problem_state.hungarian_solver.get_matching_cost()/2; //based on the conversion between MCPM and SOP, the actual lower bound is the Hungarian solution / 2
+    problem_state.hungarian_solver.undue_row(src,dst);
+    problem_state.hungarian_solver.undue_column(dst,src);
+    return lb;
 }
 
-bool solver::history_utilization(pair<boost::dynamic_bitset<>,int>& key,int* lowerbound,bool* found,HistoryNode** entry, int cost) {
-    size_t val = hash<boost::dynamic_bitset<>>{}(key.first);
-    int bucket_location = (val + key.second) % TABLE_SIZE;
-    HistoryNode* history_node = history_table.retrieve(key,bucket_location);
+bool solver::history_utilization(Key& key,int cost, int* lowerbound, bool* found, HistoryNode** entry) {
+    HistoryNode* history_node = history_table.retrieve(key);
 
     if (history_node == NULL) return true;
 
     *found = true;
     *entry = history_node;
-    HistoryContent content = history_node->Entry.load();
+    HistoryContent content = history_node->entry.load();
     *lowerbound = content.lower_bound;
 
     if (cost >= content.prefix_cost) return false;
 
-    int target_ID = history_node->active_threadID;
+    int target_ID = history_node->active_threadID; //find whoever was working in this subspace
     int imp = content.prefix_cost - cost;
     
     if (!history_node->explored) {
-        if (enable_threadstop && active_thread > 0) {
+        if (enable_threadstop && active_threads > 0) { //then issue thread stop request, since this path is superior
             buffer_lock.lock();
-            if (request_buffer.empty() || request_buffer.front().target_thread != target_ID || request_buffer.front().target_depth > (int)problem_state.cur_solution.size()) {
+            if (request_buffer.empty() || request_buffer.front().target_thread != target_ID || request_buffer.front().target_depth > (int)problem_state.current_path.size()) {
                 //num_stop[thread_id].val++;
-                request_buffer.push_front({problem_state.cur_solution.back(),(int)problem_state.cur_solution.size(),
+                request_buffer.push_front({problem_state.current_path.back(),(int)problem_state.current_path.size(),
                                            content.prefix_cost,target_ID,key.first});
                 if (!stop_sig) {
                     stop_cnt = 0;
@@ -1137,7 +1150,7 @@ bool solver::history_utilization(pair<boost::dynamic_bitset<>,int>& key,int* low
     if (imp <= content.lower_bound - best_cost) {
         return false;
     }
-    history_node->Entry.store({cost,content.lower_bound - imp});
+    history_node->entry.store({cost,content.lower_bound - imp});
     *lowerbound = content.lower_bound - imp;
     *entry = history_node;
     history_node->explored = false;
@@ -1146,9 +1159,9 @@ bool solver::history_utilization(pair<boost::dynamic_bitset<>,int>& key,int* low
     return true;
 }
 
-void solver::push_to_historytable(pair<boost::dynamic_bitset<>,int>& key,int lower_bound,HistoryNode** entry,bool backtracked) {
-    if (entry == NULL) history_table.insert(key,problem_state.cur_cost,lower_bound,thread_id,backtracked,problem_state.cur_solution.size());
-    else *entry = history_table.insert(key,problem_state.cur_cost,lower_bound,thread_id,backtracked,problem_state.cur_solution.size());
+void solver::push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,bool backtracked) {
+    if (entry == NULL) history_table.insert(key,problem_state.current_cost,lower_bound,thread_id,backtracked,problem_state.current_path.size());
+    else *entry = history_table.insert(key,problem_state.current_cost,lower_bound,thread_id,backtracked,problem_state.current_path.size());
     return;
 }
 

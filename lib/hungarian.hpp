@@ -7,7 +7,7 @@ using std::max;
 using std::min;
 using std::vector;
 
-
+//The dynamic hungarian library code is referenced from https://github.com/rod409/SOP.
 class Hungarian {
 
 public:
