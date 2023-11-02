@@ -4,40 +4,6 @@
     #include "hungarian.hpp"
     // #include "active_tree.hpp"
 
-
-    // there may be room for OS / hardware specific preformance enchancements 
-// but it seems unlikely to provide much benefit
-// does not prevent starvation but I doubt it will impact preformance
-    class spin_lock { 
-            std::atomic_flag locked = ATOMIC_FLAG_INIT ;
-        public:
-            void lock() {
-                while (locked.test_and_set(std::memory_order_acquire)) { ; }
-            }
-            void unlock() {
-                locked.clear(std::memory_order_release);
-            }
-    };
-    
-    //used to pick the next thread to be stolen from
-    class workstealing_targeter {
-        public:
-            workstealing_targeter(int size){
-                size = size;
-            }
-            int get(){
-                lock.lock();
-                int return_value = cur;
-                cur = (cur + 1) % size;
-                lock.unlock();
-                return return_value;
-            }
-        private:
-            int cur = 0;
-            int size;
-            spin_lock lock;
-    };
-
     /* An edge in the cost graph, from src to dst with cost weight. */
     class edge {
         public:
@@ -96,79 +62,6 @@
             //     partial_active_path = temp_active_path;
             //     root_his_node = temp_root_hisnode;
             // }
-    };
-
-    class local_pool {
-        public:
-            /*Grabs a node from the shallowest / zero pool*/
-            bool pop_from_zero_list(int thread_number, path_node &result_node){
-                if (pools[thread_number].size() == 0)
-                    return false;
-                locks[thread_number].lock();
-
-                if (pools[thread_number].size() == 0 || pools[thread_number].front().empty()){
-                    locks[thread_number].unlock();
-                    return false;
-                }
-
-                result_node = pools[thread_number].front().front();
-                pools[thread_number].front().pop_front();
-
-                if (pools[thread_number].front().empty()){
-                    pools[thread_number].pop_front();
-                }
-
-                locks[thread_number].unlock();
-                return true;
-            };
-            /*Grabs a node from the deepest / active pool*/
-            bool pop_from_active_list(int thread_number, path_node &result_node){
-                if (pools[thread_number].size() == 0)
-                    return false;
-                if (pools[thread_number].size() == 1){
-                    locks[thread_number].lock();
-                }
-
-                if (pools[thread_number].size() == 0 || pools[thread_number].back().empty()){
-                    if (pools[thread_number].size() == 1)
-                    {
-                        locks[thread_number].unlock();
-                    }
-                    return false;
-                }
-
-                result_node = pools[thread_number].back().front();
-                pools[thread_number].back().pop_front();
-
-                if (pools[thread_number].size() == 1){
-                    locks[thread_number].unlock();
-                }
-                return true;
-            };
-            /*Pushes new list to the back of the local pool*/
-            void push_list(int thread_number, std::deque<path_node> list){
-                locks[thread_number].lock();
-
-                pools[thread_number].push_back(list);
-
-                locks[thread_number].unlock();
-            };
-            /*removes */
-            void pop_active_list(int thread_number){
-                locks[thread_number].lock();
-                pools[thread_number].pop_back();
-                locks[thread_number].unlock();
-            };
-            bool out_of_work(int thread_number){
-                return pools[thread_number].size() == 0;
-            };
-            local_pool(int thread_count){
-                locks = vector<spin_lock>(thread_count);
-                pools = vector<std::deque<std::deque<path_node>>>(thread_count);
-            }
-        private:
-            std::vector<spin_lock> locks;
-            std::vector<std::deque<std::deque<path_node>>> pools;
     };
 
     /* All the information necessary about the current node in the enumeration tree.
@@ -254,13 +147,27 @@
             /* */
             bool enumeration_pre_check(path_node& active_node);
 
-            /* */
-            int dynamic_hungarian(int src, int dest);
+            /* Computes a dynamic lower bound based on the previous path with this node added, using the MCPM relaxation. 
+                Contains the fix and undue calls internally. 
+                src - the number of this node's parent
+                dst - the number of the node to be added
+                Return - the lower bound computed */
+            int dynamic_hungarian(int src, int dst);
 
-            /* */
-            bool history_utilization(pair<boost::dynamic_bitset<>,int>& key,int* lowerbound,bool* found,HistoryNode** entry, int cost);
-            /* */
-            void push_to_historytable(pair<boost::dynamic_bitset<>,int>& key,int lower_bound,HistoryNode** entry,bool backtracked);
+            /* Search the history table for previously processed similar paths, and compares the current path to that entry, if found. 
+                key - the history key corresponding to the current partial path
+                lowerbound - a return variable, which contains the lower bound found in the history table, if a corresponding entry was found
+                found - a return variable, true if an entry already existed, false otherwise
+                entry - a return variable, a pointer to the history node corresponding to this path
+                cost - the cost of the current path
+                Return - true if this node still needs to be processed, false if it should be pruned */
+            bool history_utilization(Key& key, int cost, int* lowerbound, bool* found, HistoryNode** entry);
+            /* Add a new entry to the history table. 
+                key - the history key corresponding to the partial path this entry represents
+                lower_bound - the lower bound cost of a complete solution beginning with this path
+                entry - a return variable, holds a pointer to the entry created, unless NULL is passed
+                backtracked - */
+            void push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,bool backtracked);
 
             /* Build an sop_state based off the information in a path_node. */
             sop_state generate_solver_state(path_node& subproblem);
