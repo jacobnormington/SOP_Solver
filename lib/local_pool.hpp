@@ -12,8 +12,9 @@
         public:
             /* Setup a new targeter.
                 size - the number of threads alloted to B&B enumeration */
-            workstealing_targeter(int size){
-                size = size;
+            void init(int size){
+                this->size = size;
+                //TODO: other information
             }
             /* Determine which thread should be stolen from. */
             int get(){
@@ -25,7 +26,7 @@
             }
         private:
             int cur = 0;
-            int size;
+            int size;           //number of enumeration threads
             spin_lock lock;
     };
 
@@ -34,10 +35,17 @@
         only the shallowest part of the pool, and added at the deepest level. */
     class local_pool {
         //TODO: should we instead use a priority queue here, a heap implementation instead of naively just a list of lists?
+        //TODO: maybe we should move this code into a cpp file on principle, but it isn't explicitly required
         private:
             std::vector<spin_lock> locks;
             std::vector<std::deque<std::deque<path_node>>> pools;
+            workstealing_targeter targeter; //a module 
         public:
+            local_pool(int thread_count){
+                locks = vector<spin_lock>(thread_count);
+                pools = vector<std::deque<std::deque<path_node>>>(thread_count);
+                targeter.init(thread_count);
+            }
             /*Grabs a node from the shallowest / zero pool*/
             bool pop_from_zero_list(int thread_number, path_node &result_node){
                 if (pools[thread_number].size() == 0)
@@ -97,13 +105,14 @@
                 pools[thread_number].pop_back();
                 locks[thread_number].unlock();
             };
+            /* Determines if a specific thread's local pool is completely empty. */
             bool out_of_work(int thread_number){
                 return pools[thread_number].size() == 0;
             };
-            local_pool(int thread_count){
-                locks = vector<spin_lock>(thread_count);
-                pools = vector<std::deque<std::deque<path_node>>>(thread_count);
-            }
+            /* Returns a thread number of the best victim, other than you, for workstealing. 
+                thread_number - this thread's number, to ensure you aren't recommended to steal from yourself
+                Return - the thread number of the thread to steal from */
+            int choose_victim(int thread_number) { return targeter.get(); }
     };
 
 #endif
