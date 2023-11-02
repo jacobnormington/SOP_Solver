@@ -8,7 +8,7 @@
 #include <deque>
 #include <chrono>
 #include <boost/dynamic_bitset.hpp>
-#include "solver.hpp"
+#include "graph.hpp"
 
 
 class transformer {

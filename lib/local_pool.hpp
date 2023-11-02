@@ -4,7 +4,7 @@
     #include <deque> //for the local pool structure
 
     #include "synchronization.hpp"
-    #include "solver.hpp"
+    #include "graph.hpp"
 
     //used to pick the next thread to be stolen from
     class workstealing_targeter {

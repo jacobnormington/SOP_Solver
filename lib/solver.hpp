@@ -1,78 +1,19 @@
 #ifndef SOLVER_H
     #define SOLVER_H
 
+    #include "graph.hpp"
     #include "hungarian.hpp"
     // #include "active_tree.hpp"
-
-    /* An edge in the cost graph, from src to dst with cost weight. */
-    class edge {
-        public:
-            int src;
-            int dst;
-            int weight;
-            edge(int source, int destination, int edge_weight): src{source},dst{destination},weight{edge_weight} {}
-            bool operator==(const edge &rhs) const {return this->src == rhs.src;}
-    };
-
-    /* A node in the graph, containing the information needed to consider this node compared to other children at each level. */
-    class node {
-        public:
-            int n = -1; //node number
-            int lb = -1; //lower bound cost of a complete path including the current prefix followed by this node
-            int nc = -1; //cost of the edge from the current node to this child
-            int partial_cost = -1; //total cost of path to parent
-            // unsigned long long current_node_value = -1; //the portion out of ULLONG_MAX of the working tree that is under this node
-            // bool node_invalid = false; //investigate
-            // bool pushed = false;
-            // HistoryNode* his_entry = NULL;
-            // Active_Node* act_entry = NULL;
-
-            node(int node_number): n{node_number} {}
-            node(int node_number, int lower_bound): n{node_number},lb{lower_bound} {}
-    };
-
-    /* Entry in local or global pools containing all the information about a position in the enumeration tree needed to regenerate an sop_state. */
-    class path_node {
-        public:
-            vector<int> sequence;       //the partial path represented by this node in the enumeration tree
-            int lower_bound = -1;       //the lower bound cost of a complete path beginning with sequence
-            int origin_node = -1;       //the first node in this path, after the virtual starting node, used to evenly distribute threads between subspaces in solve_parallel
-            // int parent_lv = -1;
-            // bool* invalid_ptr = NULL; //investigate
-            // bool deprecated = false; //For Thread Stopping. if this node exists in a redundant subspace and so does not need to be processed
-            // unsigned long long current_node_value = -1; //the portion out of ULLONG_MAX of the working tree that is under this node
-
-            //Active_Path partial_active_path;
-            //HistoryNode* root_his_node;
-
-            path_node () {}
-            path_node (vector<int> partial_path, int lb, int origin) {
-                sequence = partial_path;
-                lower_bound = lb;
-                origin_node = origin;
-            }
-            // path_node(vector<int> sequence_src,int originate_src, int load_info_src, 
-            //             int best_costrecord_src, unsigned long long value, Active_Path temp_active_path, 
-            //             HistoryNode* temp_root_hisnode) {
-            //     sequence = sequence_src;
-            //     lower_bound = load_info_src;
-            //     origin_node = originate_src;
-            //     parent_lv = best_costrecord_src;
-            //     current_node_value = value;
-            //     partial_active_path = temp_active_path;
-            //     root_his_node = temp_root_hisnode;
-            // }
-    };
 
     /* All the information necessary about the current node in the enumeration tree.
         Since sop_state is a struct, it is always passed by value. */
     struct sop_state {
-        vector<int> current_path; //the current partial path being considered
+        std::vector<int> current_path; //the current partial path being considered
         int current_cost; //sum cost of the current_path
         /*  for each node, whether it is included in the current path
             This typing is required because of the special behavior of std::vector<bool> that is implemented as a bitset instead of an iterable C array. */
         boost::container::vector<bool> taken_arr; 
-        vector<int> depCnt; //for each node, the number of unsatisfied dependencies before it is ready
+        std::vector<int> depCnt; //for each node, the number of unsatisfied dependencies before it is ready
 
         //previously called load_info
         int lower_bound = -1; //the lower bound cost of a complete solution beginning with current_path
@@ -100,7 +41,7 @@
 
             // deque<instrct_node> wrksteal_pool;
             // deque<instrct_node> *local_pool = NULL;
-            // vector<recur_state> recur_stack;
+            // std::vector<recur_state> recur_stack;
 
             // Active_Allocator Allocator;
             // Active_Path cur_active_tree;
@@ -125,11 +66,11 @@
             /* Transforms dependency and Hungarian graphs, adding redundant edges from grandparents, great grandparents, etc., and initializes in_degree. */
             void transitive_redundancy();
             /* Computes the transitive closure of the graph. Used for calculating precedence density. */
-            size_t transitive_closure(vector<vector<int>>& isucc_graph);
+            size_t transitive_closure(std::vector<std::vector<int>>& isucc_graph);
             /* Performs the Nearest Neighbor Heuristic for the SOP to find an initial solution. */
             vector<int> nearest_neighbor(vector<int>* partial_solution);
             /* Sort the cost graph in descending order of weight. Required for nearest neighbor heuristic. */
-            void sort_weight(vector<vector<edge>>& graph);
+            void sort_weight(std::vector<std::vector<edge>>& graph);
             /* Find the highest edge weight in the entire cost graph. Required for Hungarian algorithm. */
             int get_maxedgeweight();
             /* Generate the cost matrix that the Hungarian algorithm uses. */
