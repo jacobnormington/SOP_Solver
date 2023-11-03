@@ -1,36 +1,4 @@
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <iomanip>
-#include <vector>
-//#include <queue>
-#include <deque>
-#include <stack>
-//#include <unordered_map>
-#include <unordered_set>
-#include <math.h>
-#include <cmath>
-#include <limits>
-#include <algorithm>
-#include <cstring>
-#include <numeric>
-#include <functional>
-#include <chrono>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-
-#include <boost/container/vector.hpp>
-#include <boost/dynamic_bitset.hpp>
-
-extern "C" {
-    #include "LKH/LKHmain.h"
-}
-
 #include "solver.hpp"
-#include "history_table.hpp"
-#include "local_pool.hpp"
-//#include "precedence.hpp"
 
 #define TABLE_SIZE 541065431                        //number of buckets in the history table
 
@@ -1022,36 +990,6 @@ vector<vector<int>> solver::get_cost_matrix(int max_edge_weight) {
     return matrix;
 }
 
-void solver::workload_request(){
-    // TODO: take from global pool
-    path_node new_node;
-
-
-    new_node = workstealing();
-
-    //TODO: setup new solver state
-    //problem_state = generate_solver_state(new_node);
-}
-
-path_node solver::workstealing(){
-    path_node stolen_node;
-    while(true){
-        int target_id = local_pools->choose_victim(thread_id);
-        if(target_id == thread_id)
-            continue;
-        
-        if(local_pools->pop_from_zero_list(target_id, stolen_node))
-            break;
-    }
-
-    return stolen_node;
-}
-
-bool solver::enumeration_pre_check(path_node& active_node){//true on failure
-    //TODO: check lower bound stuff
-    return true;
-}
-
 bool solver::split_level_check(deque<sop_state>* solver_container) {
     // unsigned target_level = solver_container->front().current_path.size();
     // for (auto node : *solver_container) {
@@ -1063,47 +1001,10 @@ bool solver::split_level_check(deque<sop_state>* solver_container) {
     return solver_container->front().current_path.size() != solver_container->back().current_path.size();
 }
 
-// void solver::run_lkh() {
-//     while(!BB_Complete) {
-//         LKH(&filename[0],initial_LKHRun);
-//         if (initial_LKHRun) {
-//             initial_LKHRun = false;
-//         }
-//         BB_SolFound = false;
-//     }
-//     return;
-// }
-
-/*sop_state solver::generate_solver_state(path_node& subproblem) {
-    sop_state state = default_state;
-
-    int cur_node = subproblem.sequence.front();
-    int taken_node = -1;
-    int size = subproblem.sequence.size();
-    state.current_path.push_back(0);
-    state.taken_arr[cur_node] = true;
-    for (int vertex : dependency_graph[cur_node]) state.depCnt[vertex]--;
-
-    for (int k = 1; k < size; k++) { //begin after the first, trivial, node
-        taken_node = subproblem.sequence[k];
-        state.current_path.push_back(taken_node);
-        state.taken_arr[taken_node] = true;
-        for (int vertex : dependency_graph[taken_node]) state.depCnt[vertex]--;
-        state.current_cost += cost_graph[cur_node][taken_node].weight;
-        state.hungarian_solver.fix_row(cur_node, taken_node);
-        state.hungarian_solver.fix_column(taken_node, cur_node);
-    }
-    
-    state.origin_node = subproblem.origin_node;
-    state.lower_bound = subproblem.lower_bound;
-    // solvers[thread_cnt].problem_state.initial_depth = solvers[thread_cnt].problem_state.cur_solution.size();
-    // solvers[thread_cnt].problem_state.current_node_value = problem.current_node_value; //for progress estimation
-
-    return state;
-}*/
-
-
-
+bool solver::enumeration_pre_check(path_node& active_node){//true on failure
+    //TODO: check lower bound stuff
+    return true;
+}
 
 int solver::dynamic_hungarian(int src, int dst) {
     problem_state.hungarian_solver.fix_row(src, dst);
@@ -1171,6 +1072,82 @@ void solver::push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,
 
 
 
+
+
+
+/* BEGIN WORK STEALING */
+void solver::workload_request(){
+    // TODO: take from global pool
+    path_node new_node;
+
+
+    new_node = workstealing();
+
+    //TODO: setup new solver state
+    //problem_state = generate_solver_state(new_node);
+}
+
+path_node solver::workstealing(){
+    path_node stolen_node;
+    while(true){
+        int target_id = local_pools->choose_victim(thread_id);
+        if(target_id == thread_id)
+            continue;
+        
+        if(local_pools->pop_from_zero_list(target_id, stolen_node))
+            break;
+    }
+
+    return stolen_node;
+}
+
+/*sop_state solver::generate_solver_state(path_node& subproblem) {
+    sop_state state = default_state;
+
+    int cur_node = subproblem.sequence.front();
+    int taken_node = -1;
+    int size = subproblem.sequence.size();
+    state.current_path.push_back(0);
+    state.taken_arr[cur_node] = true;
+    for (int vertex : dependency_graph[cur_node]) state.depCnt[vertex]--;
+
+    for (int k = 1; k < size; k++) { //begin after the first, trivial, node
+        taken_node = subproblem.sequence[k];
+        state.current_path.push_back(taken_node);
+        state.taken_arr[taken_node] = true;
+        for (int vertex : dependency_graph[taken_node]) state.depCnt[vertex]--;
+        state.current_cost += cost_graph[cur_node][taken_node].weight;
+        state.hungarian_solver.fix_row(cur_node, taken_node);
+        state.hungarian_solver.fix_column(taken_node, cur_node);
+    }
+    
+    state.origin_node = subproblem.origin_node;
+    state.lower_bound = subproblem.lower_bound;
+    // solvers[thread_cnt].problem_state.initial_depth = solvers[thread_cnt].problem_state.cur_solution.size();
+    // solvers[thread_cnt].problem_state.current_node_value = problem.current_node_value; //for progress estimation
+
+    return state;
+}*/
+/* END WORK STEALING */
+
+
+/* BEGIN THREAD STOPPING */
+
+/* END THREAD STOPPING */
+
+
+/* BEGIN LKH */
+// void solver::run_lkh() {
+//     while(!BB_Complete) {
+//         LKH(&filename[0],initial_LKHRun);
+//         if (initial_LKHRun) {
+//             initial_LKHRun = false;
+//         }
+//         BB_SolFound = false;
+//     }
+//     return;
+// }
+/* END LKH */
 
 
 //Compare two edges in the cost graph, a and b by their weight. a > b (therefore "better"), if a.weight < b.weight

@@ -1,9 +1,51 @@
 #ifndef SOLVER_H
     #define SOLVER_H
 
+    #include <iostream>
+    #include <fstream>
+    #include <sstream>
+    #include <iomanip>
+    #include <vector>
+    //#include <queue>
+    #include <deque>
+    #include <stack>
+    //#include <unordered_map>
+    #include <unordered_set>
+    #include <math.h>
+    #include <cmath>
+    #include <limits>
+    #include <algorithm>
+    #include <cstring>
+    #include <numeric>
+    #include <functional>
+    #include <chrono>
+    #include <thread>
+    #include <mutex>
+    #include <condition_variable>
+
+    #include <boost/container/vector.hpp>
+    #include <boost/dynamic_bitset.hpp>
+
+    extern "C" {
+        #include "LKH/LKHmain.h"
+    }
+
+
+    #include "history_table.hpp"
+    #include "local_pool.hpp"
     #include "graph.hpp"
     #include "hungarian.hpp"
     // #include "active_tree.hpp"
+    //#include "precedence.hpp"
+
+    /* A Thread Stop request. */
+    struct request_packet {
+        int target_last_node;
+        int target_depth;
+        int target_prefix_cost;
+        int target_thread;
+        boost::dynamic_bitset<> key;
+    };
 
     /* All the information necessary about the current node in the enumeration tree.
         Since sop_state is a struct, it is always passed by value. */
@@ -76,8 +118,6 @@
             /* Generate the cost matrix that the Hungarian algorithm uses. */
             vector<vector<int>> get_cost_matrix(int max_edge_weight);
 
-            /* Repeatedly run LKH routine. */
-            void run_lkh();
             /* Called from solver::solve, divides work among global pool and each thread, and begins the threads with calls to solver::enumerate. */
             void solve_parallel(); 
             /* Returns true if any sop_state in the container has a depth different than any other, false otherwise. Used for initial splitting in solve_parallel. */
@@ -107,21 +147,26 @@
                 key - the history key corresponding to the partial path this entry represents
                 lower_bound - the lower bound cost of a complete solution beginning with this path
                 entry - a return variable, holds a pointer to the entry created, unless NULL is passed
-                backtracked - */
+                backtracked - if the subtree under this node has already been fully explored */
             void push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,bool backtracked);
-
-            /* Build an sop_state based off the information in a path_node. */
-            sop_state generate_solver_state(path_node& subproblem);
-            /* Build a hungarian solver state based upon the problem_state. Used in generate_solver_state. */
-            void regenerate_hungstate();
 
             /* */
             void solver::workload_request();
             /* */
             path_node solver::workstealing();
+            /* Build an sop_state based off the information in a path_node. */
+            sop_state generate_solver_state(path_node& subproblem);
+            /* Build a hungarian solver state based upon the problem_state. Used in generate_solver_state. */
+            void regenerate_hungstate();
+            //assign_workload???
+            //push_to_pool???
 
-            /* Initialize local pools. */
-            //void local_pool_config(float precedence_density);
+            //check_request_buffer
+            //thread_stop
+
+            /* Repeatedly run LKH routine. */
+            void run_lkh();
+
         public:
             /* Takes config information and defines all runtime parameters from those strings. */
             void assign_parameter(vector<string> setting);
