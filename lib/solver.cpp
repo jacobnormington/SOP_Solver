@@ -565,18 +565,17 @@ void solver::enumerate(){
     deque<path_node> ready_list;
     bool limit_insertion = false;
 
-    for(int node_id = 0; node_id < instance_size; node_id++){
-        if(!problem_state.depCnt[node_id] && !problem_state.taken_arr[node_id]){
+    for(int taken_node = 0; taken_node < instance_size; taken_node++){
+        if(!problem_state.depCnt[taken_node] && !problem_state.taken_arr[taken_node]){
             
-
             //triming
-            int src = problem_state.current_path.back();
-            problem_state.current_path.push_back(node_id);
-            problem_state.current_cost += cost_graph[src][node_id].weight;
+            int source_node = problem_state.current_path.back();
+            problem_state.current_path.push_back(taken_node);
+            problem_state.current_cost += cost_graph[source_node][taken_node].weight;
             int lower_bound = -1;
             bool taken = false;
-            problem_state.history_key.first[node_id] = true;
-            problem_state.history_key.second = node_id;
+            problem_state.history_key.first[taken_node] = true;
+            problem_state.history_key.second = taken_node;
             HistoryNode* his_node = NULL;
             Active_Node* active_node = NULL;
 
@@ -584,19 +583,12 @@ void solver::enumerate(){
             //enumerated_nodes[thread_id].val++;
 
             if (!taken) { //if there is no similar entry in the history table
-                lower_bound = dynamic_hungarian(src,node_id);
+                lower_bound = dynamic_hungarian(source_node, taken_node);
                 if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size()) push_to_history_table(problem_state.history_key,lower_bound,&his_node,false);
                 else limit_insertion = true;
             }
             else if (taken && !decision) { //if this path is dominated by another path
-                //TODO: add a prune function that does all this
-                // if (enable_progress_estimation) //pruned due to history domination
-                //     estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming 
-
-                problem_state.current_path.pop_back();          
-                problem_state.current_cost -= cost_graph[src][node_id].weight;
-                problem_state.history_key.first[node_id] = false;
-                problem_state.history_key.second = src;
+                prune(source_node, taken_node);
                 continue;
             }
 
@@ -606,13 +598,7 @@ void solver::enumerate(){
                     if (content.prefix_cost >= problem_state.current_cost) his_node->explored = true;
                 }
 
-                // if (enable_progress_estimation) //track the size of the trimmed subtree
-                //     estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming
-
-                problem_state.current_path.pop_back();
-                problem_state.current_cost -= cost_graph[src][node_id].weight;
-                problem_state.history_key.first[node_id] = false;
-                problem_state.history_key.second = src;
+                prune(source_node, taken_node);
                 continue;
             }
 
@@ -620,9 +606,9 @@ void solver::enumerate(){
             path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node);
             ready_list.push_back(temp);
             problem_state.current_path.pop_back();
-            problem_state.current_cost -= cost_graph[src][node_id].weight;
-            problem_state.history_key.first[node_id] = false;
-            problem_state.history_key.second = src;
+            problem_state.current_cost -= cost_graph[source_node][taken_node].weight;
+            problem_state.history_key.first[taken_node] = false;
+            problem_state.history_key.second = source_node;
         }
     }
 
@@ -672,7 +658,7 @@ void solver::enumerate(){
         // HistoryNode *previous_hisnode = current_hisnode;
         // current_hisnode = history_entry;
         // problem_state.suffix_cost = 0;
-
+        problem_state.enumeration_depth++;
 
 
         enumerate();
@@ -680,6 +666,7 @@ void solver::enumerate(){
 
 
         /* Untake */
+        problem_state.enumeration_depth--;
         //current_hisnode = previous_hisnode;
         //problem_state.suffix_cost????
         problem_state.hungarian_solver.undue_row(src, taken_node);
@@ -709,7 +696,7 @@ void solver::enumerate(){
         }
     }
 
-    if (local_pools->out_of_work(thread_id)) //TODO: consider the while(true) vs. a new call to enumerate, and recursion depth problems
+    if (local_pools->out_of_work(thread_id) && problem_state.enumeration_depth == 0) //TODO: consider the while(true) vs. a new call to enumerate, and recursion depth problems
         workload_request();
 
     return;
@@ -1004,6 +991,17 @@ bool solver::split_level_check(deque<sop_state>* solver_container) {
 bool solver::enumeration_pre_check(path_node& active_node){//true on failure
     //TODO: check lower bound stuff
     return true;
+}
+
+void solver::prune(int source_node, int taken_node){
+    //TODO: progress estimation
+    // if (enable_progress_estimation) //pruned due to history domination
+    //     estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming 
+
+    problem_state.current_path.pop_back();          
+    problem_state.current_cost -= cost_graph[source_node][taken_node].weight;
+    problem_state.history_key.first[taken_node] = false;
+    problem_state.history_key.second = source_node;
 }
 
 int solver::dynamic_hungarian(int src, int dst) {
