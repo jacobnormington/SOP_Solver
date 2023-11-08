@@ -17,15 +17,15 @@
     // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
     // group_sample_time                            //period on which to schedule thread restart
     // static int tgroup_ratio = 0;                 //
-    static bool enable_workstealing = false;
-    static bool enable_threadstop = false;
-    static bool enable_lkh = false;
-    static bool enable_progress_estimation = false;
+    // static bool enable_workstealing = false;
+    // static bool enable_threadstop = false;
+    // static bool enable_lkh = false;
+    // static bool enable_progress_estimation = false;
 
     //derived attributes
     static int max_edge_weight = 0;                 //highest weight of any edge in the cost graph
     static float pre_density = 0;                   //number of edges in precedence graph (including derived edges) / the maximum possible
-    static int local_pool_size = 0;                 //determined based on presidence density
+    // static int local_pool_size = 0;                 //determined based on presidence density
 /////////////////////////////////////////
 
 
@@ -44,7 +44,7 @@
     
 
     static vector<int> best_solution;               //the lowest cost solution found so far in any thread
-    static int best_cost = INT_MAX;                 //the cost of best_solution
+    int best_cost = INT_MAX;                        //the cost of best_solution, this is an extern (global) variable shared by LKH
 
     std::chrono::time_point<std::chrono::system_clock> solver_start_time;  //when solve_parallel started (before processing begins, but after all the basic setup, file parsing, etc.)
     // std::chrono::time_point<std::chrono::system_clock> time_point;
@@ -126,6 +126,15 @@
 
 
 
+//Compare two edges in the cost graph, a and b by their weight. a > b (therefore "better"), if a.weight < b.weight
+bool compare_edge(const edge a, const edge b) { return a.weight < b.weight; }
+//TODO: ensure that this actually means that you are picking the "best" nodes, and it isn't accidentally reverse-sorted
+//sort by increasing lower bound
+bool global_pool_sort(const path_node& src, const path_node& dest) { return src.lower_bound > dest.lower_bound; }
+//sort by increasing lower bound
+bool local_pool_sort(const path_node& src, const path_node& dest)  { return src.lower_bound > dest.lower_bound; }
+
+
 void solver::assign_parameter(vector<string> setting) {
     t_limit = atoi(setting[0].c_str());
     std::cout << "Time limit = " << t_limit << std::endl;
@@ -168,7 +177,7 @@ void solver::solve(string f_name, int thread_num) {
         exit(EXIT_FAILURE);
     }
 
-    if (enable_lkh) thread_total = thread_num - 1;
+    //if (enable_lkh) thread_total = thread_num - 1;
     else thread_total = thread_num;
     filename = f_name;
 
@@ -328,7 +337,7 @@ void solver::solve_parallel() {
     //     //cout << "Ready list: " << ready_list.size() << ", " << "child_node_value: " << child_node_value << ", " << "remainder: " << remainder << endl;
     // }
 
-    int child_num = 0; //the arbitrary birth-order of children in the ready_list, used for progress estimation
+    //int child_num = 0; //the arbitrary birth-order of children in the ready_list, used for progress estimation
     for (auto node : ready_list) {
         // if (enable_progress_estimation)
         // {
@@ -463,7 +472,7 @@ void solver::solve_parallel() {
     //cout << "GPQ initial depth is " << GPQ.back().cur_solution.size() << endl;
     //cout << "Initial GPQ size is " << GPQ.Unknown.size() << endl;
     //calculate_standard_deviation();
-    for (int i = 0; i < global_pool.size(); i++)
+    for (long unsigned int i = 0; i < global_pool.size(); i++)
     {
         std::cout << global_pool[i].lower_bound << " ";
     }
@@ -477,7 +486,7 @@ void solver::solve_parallel() {
     boost::container::vector<bool> origin_taken_arr = boost::container::vector<bool>(instance_size,false);
     while (thread_cnt < thread_total) { //continue, even taking duplicates from the same origin, in order to get work for every thread
         fill(origin_taken_arr.begin(),origin_taken_arr.end(),false); //to more evenly distribute work, only one child of each of the first generation should be taken
-        for (int i = 0; i < global_pool.size(); i++) { 
+        for (long unsigned int i = 0; i < global_pool.size(); i++) { 
             if (thread_cnt >= thread_total) break;
             unsigned origin = global_pool[i].origin_node;
 
@@ -511,7 +520,7 @@ void solver::solve_parallel() {
 
                 solvers[thread_cnt].thread_id = thread_cnt;
                 solvers[thread_cnt].instance_size = instance_size;
-                // solvers[thread_cnt].lb_curlv = problem.lower_bound;
+                //solvers[thread_cnt].lb_curlv = problem.lower_bound;
                 // solvers[thread_cnt].cur_active_tree = Active_Path(solvers[thread_cnt].problem_state.cur_solution.size());
                 // solvers[thread_cnt].cur_active_tree.set_threadID(thread_cnt, thread_total);
                 
@@ -614,6 +623,8 @@ void solver::enumerate(){
                         best_solution = problem_state.current_path;
                     }
                     best_solution_lock.unlock();
+
+
                 }
 
                 //"good" node, add it to the ready_list, then reset problem state
@@ -626,24 +637,31 @@ void solver::enumerate(){
             }
         }
 
+
         if(problem_state.current_path.size() == instance_size - 1){ //already calculated leaf nodes
             //TODO: purge the ready_list
             return;
         }
 
-        //TODO: processing on the ready_list deque ie sorting
+
+    //Sort the ready list and push into local pool
+    if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
+    local_pools->push_list(thread_id, ready_list);
+
+    //HistoryNode* history_entry = NULL;
+
+    int lb_liminsert = problem_state.lower_bound; //save lower bound through enumeration for limit insertion in the history table
+
+    //cur_active_tree.push_back(enumeration_list.size(),current_hisnode,Allocator);
+    
+    //CheckStop_Request();
+    
 
 
-        local_pools->push_list(thread_id, ready_list);
-
-        //CheckStop_Request();
-        
-        /* Begin enumeration. */
-        path_node active_node;
-        while (local_pools->pop_from_active_list(thread_id, active_node)){
-            if(enumeration_pre_check(active_node)) continue;
-
-            // Check_Restart_Status(enumeration_list, curlocal_nodes);
+    /* Begin enumeration. */
+    path_node active_node;
+    while (local_pools->pop_from_active_list(thread_id, active_node)){
+        if(enumeration_pre_check(active_node)) continue;
 
             // if (abandon_share || abandon_work) { //should both be in enumeration_pre_check
             //     curlocal_nodes.clear();
@@ -713,6 +731,20 @@ void solver::enumerate(){
                 }
             }
         }
+
+    }
+
+    // if (stop_init && (int)problem_state.cur_solution.size() <= stop_depth) {
+    //     stop_init = false;
+    //     stop_depth = -1;
+    //     last_node = -1;
+    // }
+    
+    if (limit_insertion && history_table.get_current_size() < history_table.get_max_size() && problem_state.current_path.size() >= inhis_depth) { //don't add if it was already added
+        push_to_history_table(problem_state.history_key,lb_liminsert,NULL,false);
+    }
+
+    // cur_active_tree.pop_back(stop_init,Allocator);
 
         if(problem_state.enumeration_depth != 0 || !workload_request())
             return;
@@ -1007,8 +1039,23 @@ bool solver::split_level_check(deque<sop_state>* solver_container) {
 }
 
 bool solver::enumeration_pre_check(path_node& active_node){//true on failure
-    //TODO: check lower bound stuff
-    return true;
+    if (active_node.lower_bound >= best_cost 
+        // || stop_init
+        // || (enable_threadstop && active_node.his_entry != NULL 
+        //                       && active_node.his_entry->Entry.load().prefix_cost < active_node.partial_cost)
+       )
+    {   
+        // if (enable_progress_estimation) //pruning due to enumeration-time backtracking
+        //     estimated_trimmed_percent[thread_id] += active_node.current_node_value; //add the value of this node you are trimming
+
+        // cur_active_tree.incre_children_cnt(Allocator);
+        // if (active_node.his_entry != NULL && active_node.his_entry->active_threadID == thread_id) {
+        //     active_node.his_entry->explored = true;
+        // }
+
+        return true;
+    }
+    return false;
 }
 
 void solver::prune(int source_node, int taken_node){
@@ -1045,23 +1092,23 @@ bool solver::history_utilization(Key& key,int cost, int* lowerbound, bool* found
 
     if (cost >= content.prefix_cost) return false;
 
-    int target_ID = history_node->active_threadID; //find whoever was working in this subspace
+    //int target_ID = history_node->active_threadID; //find whoever was working in this subspace
     int imp = content.prefix_cost - cost;
     
     if (!history_node->explored) {
-        if (enable_threadstop && active_threads > 0) { //then issue thread stop request, since this path is superior
-            buffer_lock.lock();
-            if (request_buffer.empty() || request_buffer.front().target_thread != target_ID || request_buffer.front().target_depth > (int)problem_state.current_path.size()) {
-                //num_stop[thread_id].val++;
-                request_buffer.push_front({problem_state.current_path.back(),(int)problem_state.current_path.size(),
-                                           content.prefix_cost,target_ID,key.first});
-                if (!stop_sig) {
-                    stop_cnt = 0;
-                    stop_sig = true;
-                }
-            }
-            buffer_lock.unlock();
-        }
+        // if (enable_threadstop && active_threads > 0) { //then issue thread stop request, since this path is superior
+        //     buffer_lock.lock();
+        //     if (request_buffer.empty() || request_buffer.front().target_thread != target_ID || request_buffer.front().target_depth > (int)problem_state.current_path.size()) {
+        //         //num_stop[thread_id].val++;
+        //         request_buffer.push_front({problem_state.current_path.back(),(int)problem_state.current_path.size(),
+        //                                    content.prefix_cost,target_ID,key.first});
+        //         if (!stop_sig) {
+        //             stop_cnt = 0;
+        //             stop_sig = true;
+        //         }
+        //     }
+        //     buffer_lock.unlock();
+        // }
     }
 
     if (imp <= content.lower_bound - best_cost) {
@@ -1174,13 +1221,6 @@ bool solver::workload_request(){
 // }
 /* END LKH */
 
-
-//Compare two edges in the cost graph, a and b by their weight. a > b (therefore "better"), if a.weight < b.weight
-bool compare_edge(const edge a, const edge b) { return a.weight < b.weight; }
-//sort by increasing lower bound
-bool global_pool_sort(const path_node& src, const path_node& dest) { return src.lower_bound > dest.lower_bound; }
-//sort by increasing lower bound
-bool local_pool_sort(const path_node& src, const path_node& dest)  { return src.lower_bound > dest.lower_bound; }
 
 
 

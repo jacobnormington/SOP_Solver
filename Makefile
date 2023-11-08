@@ -14,7 +14,7 @@ OBJDIR = obj
 LKH_OBJS = $(patsubst %,$(OBJDIR)/%,$(_LKH_OBJS))
 PBB_OBJS = $(patsubst %,$(OBJDIR)/%,$(_PBB_OBJS))
 
-_PBB_OBJS = main.o solver.o hash.o hungarian.o active_tree.o precedence.o active_allocate.o
+_PBB_OBJS = main.o solver.o history_table.o hungarian.o 
 _LKH_OBJS = Activate.o AddCandidate.o AddExtraCandidates.o                  \
 		AddTourCandidates.o AdjustCandidateSet.o AdjustClusters.o       \
 		AllocateStructures.o Ascent.o                                   \
@@ -70,7 +70,7 @@ _LKH_OBJS = Activate.o AddCandidate.o AddExtraCandidates.o                  \
 
 PROG = sop_solver
 
-$(PROG): $(PBB_OBJS) $(LKH_OBJS)
+$(PROG): $(PBB_OBJS) #$(LKH_OBJS)
 	$(CC) $(CXXFLAG) $(OPTIMIZATION_LINK) $(LINK) $(PROG) $^
 
 $(OBJDIR)/%.o: $(SRC)/%.cpp
@@ -80,8 +80,8 @@ $(OBJDIR)/%.o: $(SRC)/%.cpp
 $(OBJDIR)/%.o: $(PBB_LIB)/%.cpp
 	$(CC) $(CXXFLAG) $(OPTIMIZATION) $< -o $@
 
-$(OBJDIR)/%.o: $(LKH_LIB)/%.c
-	$(CG) $(OPTIMIZATION) $< -o $@
+# $(OBJDIR)/%.o: $(LKH_LIB)/%.c
+# 	$(CG) $(OPTIMIZATION) $< -o $@
 
 clean:
 	rm -rf $(OBJDIR)/*.o sop_solver obj
