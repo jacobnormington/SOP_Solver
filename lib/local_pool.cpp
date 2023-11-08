@@ -64,10 +64,10 @@
 
     int local_pool::choose_victim(int thread_number){
         workstealing_lock.lock();
-        while (current_target != thread_number)
-            (current_target + 1) % thread_count;
+        do {
+            current_target = (current_target + 1) % thread_count;
+        } while (current_target == thread_number); //skip the requesting thread
         int return_value = current_target;
-        current_target = (current_target + 1) % thread_count;
         workstealing_lock.unlock();
         return return_value;
     }

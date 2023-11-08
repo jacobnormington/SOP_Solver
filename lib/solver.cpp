@@ -587,12 +587,12 @@ void solver::enumerate(){
                 problem_state.history_key.first[taken_node] = true;
                 problem_state.history_key.second = taken_node;
                 HistoryNode* his_node = NULL;
-                Active_Node* active_node = NULL;
+                //Active_Node* active_node = NULL;
 
                 bool decision = history_utilization(problem_state.history_key,problem_state.current_cost,&lower_bound,&taken,&his_node);
                 //enumerated_nodes[thread_id].val++;
 
-                if(problem_state.current_path.size() < instance_size ){ // if the current solution is not complete
+                if(((int) problem_state.current_path.size()) < instance_size ){ // if the current solution is not complete
                     if(problem_state.current_cost >= best_cost){ //if the current cost is worse than the best cost
                         prune(source_node, taken_node);
                         continue;
@@ -638,7 +638,7 @@ void solver::enumerate(){
         }
 
 
-        if(problem_state.current_path.size() == instance_size - 1){ //already calculated leaf nodes
+        if(((int) problem_state.current_path.size()) == instance_size - 1){ //already calculated leaf nodes
             //TODO: purge the ready_list
             return;
         }
@@ -1173,7 +1173,7 @@ bool solver::workload_request(){
     //problem_state = generate_solver_state(new_node);
 }
 
-/*sop_state solver::generate_solver_state(path_node& subproblem) {
+sop_state solver::generate_solver_state(path_node& subproblem) {
     sop_state state = default_state;
 
     int cur_node = subproblem.sequence.front();
@@ -1192,6 +1192,21 @@ bool solver::workload_request(){
         state.hungarian_solver.fix_row(cur_node, taken_node);
         state.hungarian_solver.fix_column(taken_node, cur_node);
     }
+
+    //generate history table key
+    boost::dynamic_bitset<> bit_vector(instance_size, false);
+    for (auto node : problem_state.current_path) {
+        bit_vector[node] = true;
+    }
+    int last_element = problem_state.current_path.back();
+    problem_state.history_key = make_pair(bit_vector,last_element);
+
+    
+    // cur_active_tree.generate_path(sequence_node.partial_active_path);
+    // cur_active_tree.set_threadID(thread_id, thread_total);
+    // if (current_hisnode != NULL && !current_hisnode->explored) {
+    //     current_hisnode->active_threadID = thread_id;
+    // }
     
     state.origin_node = subproblem.origin_node;
     state.lower_bound = subproblem.lower_bound;
@@ -1199,7 +1214,7 @@ bool solver::workload_request(){
     // solvers[thread_cnt].problem_state.current_node_value = problem.current_node_value; //for progress estimation
 
     return state;
-}*/
+}
 /* END WORK STEALING */
 
 
