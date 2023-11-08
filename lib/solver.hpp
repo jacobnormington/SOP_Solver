@@ -26,9 +26,9 @@
     #include <boost/container/vector.hpp>
     #include <boost/dynamic_bitset.hpp>
 
-    extern "C" {
-        #include "LKH/LKHmain.h"
-    }
+    // extern "C" {
+    //     #include "LKH/LKHmain.h"
+    // }
 
 
     #include "history_table.hpp"
