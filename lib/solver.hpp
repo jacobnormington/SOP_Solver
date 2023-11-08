@@ -66,6 +66,8 @@
         pair<boost::dynamic_bitset<>,int> history_key;
         HistoryNode* cur_parent_hisnode = NULL;
         
+        int enumeration_depth = 0; // the depth of the enumeration recursion stack
+
         // int initial_depth = 0; //depth at which enumeration began once GPQ was initially filled
         // int suffix_cost = 0;
         // unsigned long long current_node_value = -1; //the portion out of ULLONG_MAX of the working tree that is under this node (the partial path represented by this state)
@@ -128,6 +130,8 @@
             /* Check the next node before enumeration, and discard it if invalid. Includes its own progress tracking. 
                 Return - true if the node was discarded, false if its subspace must still be enumerated */
             bool enumeration_pre_check(path_node& active_node);
+            /*called when pruning a node in enumerate*/
+            void prune(int source_node, int taken_node);
 
             /* Computes a dynamic lower bound based on the previous path with this node added, using the MCPM relaxation. 
                 Contains the fix and undue calls internally. 
@@ -151,10 +155,10 @@
                 backtracked - if the subtree under this node has already been fully explored */
             void push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,bool backtracked);
 
-            /* */
-            void workload_request();
-            /* */
-            path_node workstealing();
+
+            /* returns true on success */
+            bool solver::workload_request();
+
             /* Build an sop_state based off the information in a path_node. */
             sop_state generate_solver_state(path_node& subproblem);
             /* Build a hungarian solver state based upon the problem_state. Used in generate_solver_state. */

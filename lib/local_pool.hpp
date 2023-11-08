@@ -6,113 +6,40 @@
     #include "synchronization.hpp"
     #include "graph.hpp"
 
-    //used to pick the next thread to be stolen from
-    class workstealing_targeter {
-        //TODO: does this actually need to be its own module?
-        public:
-            /* Setup a new targeter.
-                size - the number of threads alloted to B&B enumeration */
-            void init(int size){
-                this->size = size;
-                //TODO: other information
-            }
-            /* Determine which thread should be stolen from. */
-            int get(){
-                lock.lock();
-                int return_value = cur;
-                cur = (cur + 1) % size;
-                lock.unlock();
-                return return_value;
-            }
-        private:
-            int cur = 0;
-            int size;           //number of enumeration threads
-            spin_lock lock;
-    };
 
     /* The local pool construct, consisting of pools of nodes for each thread. In 
         each thread, the pool is organized by depth, so that nodes are stolen from 
         only the shallowest part of the pool, and added at the deepest level. */
     class local_pool {
         //TODO: should we instead use a priority queue here, a heap implementation instead of naively just a list of lists?
-        //TODO: maybe we should move this code into a cpp file on principle, but it isn't explicitly required
         private:
             std::vector<spin_lock> locks;
             std::vector<std::deque<std::deque<path_node>>> pools;
-            workstealing_targeter targeter; //a module 
+            
+            //workstealing variables
+            int thread_count;
+            int current_target = 0;
+            spin_lock workstealing_lock;
         public:
             local_pool(int thread_count){
-                locks = vector<spin_lock>(thread_count);
-                pools = vector<std::deque<std::deque<path_node>>>(thread_count);
-                targeter.init(thread_count);
+                locks = std::vector<spin_lock>(thread_count);
+                pools = std::vector<std::deque<std::deque<path_node>>>(thread_count);
+                this->thread_count = thread_count;
             }
             /*Grabs a node from the shallowest / zero pool*/
-            bool pop_from_zero_list(int thread_number, path_node &result_node){
-                if (pools[thread_number].size() == 0)
-                    return false;
-                locks[thread_number].lock();
-
-                if (pools[thread_number].size() == 0 || pools[thread_number].front().empty()){
-                    locks[thread_number].unlock();
-                    return false;
-                }
-
-                result_node = pools[thread_number].front().front();
-                pools[thread_number].front().pop_front();
-
-                if (pools[thread_number].front().empty()){
-                    pools[thread_number].pop_front();
-                }
-
-                locks[thread_number].unlock();
-                return true;
-            };
+            bool pop_from_zero_list(int thread_number, path_node &result_node);
             /*Grabs a node from the deepest / active pool*/
-            bool pop_from_active_list(int thread_number, path_node &result_node){
-                if (pools[thread_number].size() == 0)
-                    return false;
-                if (pools[thread_number].size() == 1){
-                    locks[thread_number].lock();
-                }
-
-                if (pools[thread_number].size() == 0 || pools[thread_number].back().empty()){
-                    if (pools[thread_number].size() == 1)
-                    {
-                        locks[thread_number].unlock();
-                    }
-                    return false;
-                }
-
-                result_node = pools[thread_number].back().front();
-                pools[thread_number].back().pop_front();
-
-                if (pools[thread_number].size() == 1){
-                    locks[thread_number].unlock();
-                }
-                return true;
-            };
+            bool pop_from_active_list(int thread_number, path_node &result_node);
             /*Pushes new list to the back of the local pool*/
-            void push_list(int thread_number, std::deque<path_node> list){
-                locks[thread_number].lock();
-
-                pools[thread_number].push_back(list);
-
-                locks[thread_number].unlock();
-            };
+            void push_list(int thread_number, std::deque<path_node> list);
             /*removes */
-            void pop_active_list(int thread_number){
-                locks[thread_number].lock();
-                pools[thread_number].pop_back();
-                locks[thread_number].unlock();
-            };
+            void pop_active_list(int thread_number);
             /* Determines if a specific thread's local pool is completely empty. */
-            bool out_of_work(int thread_number){
-                return pools[thread_number].size() == 0;
-            };
+            bool out_of_work(int thread_number);
             /* Returns a thread number of the best victim, other than you, for workstealing. 
                 thread_number - this thread's number, to ensure you aren't recommended to steal from yourself
                 Return - the thread number of the thread to steal from */
-            int choose_victim(int thread_number) { return targeter.get(); }
+            int choose_victim(int thread_number);
     };
 
 #endif
