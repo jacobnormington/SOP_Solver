@@ -157,7 +157,7 @@
 
 
             /* returns true on success */
-            bool solver::workload_request();
+            bool workload_request();
 
             /* Build an sop_state based off the information in a path_node. */
             sop_state generate_solver_state(path_node& subproblem);
