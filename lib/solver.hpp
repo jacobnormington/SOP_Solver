@@ -154,10 +154,8 @@
                 backtracked - if the subtree under this node has already been fully explored */
             void push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,bool backtracked);
 
-            /* */
-            void solver::workload_request();
-            /* */
-            path_node solver::workstealing();
+            /* returns true on success */
+            bool solver::workload_request();
             /* Build an sop_state based off the information in a path_node. */
             sop_state generate_solver_state(path_node& subproblem);
             /* Build a hungarian solver state based upon the problem_state. Used in generate_solver_state. */
