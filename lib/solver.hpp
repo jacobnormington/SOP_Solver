@@ -125,7 +125,8 @@
 
             /* Recursive function that each thread runs to process its assigned spaces of the enumeration tree, checking one node and then its children and their children, etc. */
             void enumerate();
-            /* */
+            /* Check the next node before enumeration, and discard it if invalid. Includes its own progress tracking. 
+                Return - true if the node was discarded, false if its subspace must still be enumerated */
             bool enumeration_pre_check(path_node& active_node);
 
             /* Computes a dynamic lower bound based on the previous path with this node added, using the MCPM relaxation. 
@@ -151,9 +152,9 @@
             void push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,bool backtracked);
 
             /* */
-            void solver::workload_request();
+            void workload_request();
             /* */
-            path_node solver::workstealing();
+            path_node workstealing();
             /* Build an sop_state based off the information in a path_node. */
             sop_state generate_solver_state(path_node& subproblem);
             /* Build a hungarian solver state based upon the problem_state. Used in generate_solver_state. */
