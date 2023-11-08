@@ -469,15 +469,15 @@ void solver::solve_parallel() {
     delete solver_container;
     /* End Splitting Operation */
 
-    //cout << "GPQ initial depth is " << GPQ.back().cur_solution.size() << endl;
-    //cout << "Initial GPQ size is " << GPQ.Unknown.size() << endl;
+    //std::cout << "GPQ initial depth is " << global_pool.back().cur_solution.size() << std::endl;
+    //std::cout << "Initial GPQ size is " << global_pool.size() << std::endl;
     //calculate_standard_deviation();
-    for (long unsigned int i = 0; i < global_pool.size(); i++)
-    {
-        std::cout << global_pool[i].lower_bound << " ";
-    }
-    std::cout << std::endl; 
-    exit(EXIT_SUCCESS);
+    // std::cout << "Global Pool: " << std::endl;
+    // for (long unsigned int i = 0; i < global_pool.size(); i++)
+    // {
+    //     std::cout << global_pool[i].lower_bound << " ";
+    // }
+    // std::cout << std::endl;
 
 
 
@@ -543,12 +543,11 @@ void solver::solve_parallel() {
     }
 
     // time_point = chrono::high_resolution_clock::now();
-
     for (int i = 0; i < thread_total; i++) {
         Thread_manager[i] = thread(&solver::enumerate,move(solvers[i]));
-        //active_threads++;
+        active_threads++;
     }
-
+std::cout << "Begins enumeration" << std::endl; //TODO: remove; only sometimes reaches here, because something is happening in enumerate
     for (int i = 0; i < thread_total; i++) { //waits until every thread is finished
         if (Thread_manager[i].joinable()) {
             Thread_manager[i].join();
@@ -559,7 +558,7 @@ void solver::solve_parallel() {
     //active_threads = 0;
 
     //BB_Complete = true;
-
+std::cout << "Successfully joined all threads" << std::endl; //TODO: remove
     if (time_out) cout << "instance timed out " << endl;
 
     // if (time_out || (GPQ.Unknown.empty() && GPQ.Abandoned.empty())) {
@@ -1160,17 +1159,14 @@ bool solver::workload_request(){
     while(true){
         int target = local_pools->choose_victim(thread_id);
         if(local_pools->pop_from_zero_list(target, new_node)){
-            generate_solver_state(new_node);
+            problem_state = generate_solver_state(new_node);
             return true;
         }
         if(active_threads == 0)
             return false;
     }
     active_threads++;
-    
-
-    //TODO: setup new solver state
-    //problem_state = generate_solver_state(new_node);
+    return false;
 }
 
 sop_state solver::generate_solver_state(path_node& subproblem) {
