@@ -644,24 +644,24 @@ void solver::enumerate(){
         }
 
 
-    //Sort the ready list and push into local pool
-    if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
-    local_pools->push_list(thread_id, ready_list);
+        //Sort the ready list and push into local pool
+        if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
+        local_pools->push_list(thread_id, ready_list);
 
-    //HistoryNode* history_entry = NULL;
+        //HistoryNode* history_entry = NULL;
 
-    int lb_liminsert = problem_state.lower_bound; //save lower bound through enumeration for limit insertion in the history table
+        int lb_liminsert = problem_state.lower_bound; //save lower bound through enumeration for limit insertion in the history table
 
-    //cur_active_tree.push_back(enumeration_list.size(),current_hisnode,Allocator);
-    
-    //CheckStop_Request();
-    
+        //cur_active_tree.push_back(enumeration_list.size(),current_hisnode,Allocator);
+        
+        //CheckStop_Request();
+        
 
 
-    /* Begin enumeration. */
-    path_node active_node;
-    while (local_pools->pop_from_active_list(thread_id, active_node)){
-        if(enumeration_pre_check(active_node)) continue;
+        /* Begin enumeration. */
+        path_node active_node;
+        while (local_pools->pop_from_active_list(thread_id, active_node)){
+            if(enumeration_pre_check(active_node)) continue;
 
             // if (abandon_share || abandon_work) { //should both be in enumeration_pre_check
             //     curlocal_nodes.clear();
@@ -730,21 +730,21 @@ void solver::enumerate(){
                     return;
                 }
             }
+            
+
         }
 
-    }
+        // if (stop_init && (int)problem_state.cur_solution.size() <= stop_depth) {
+        //     stop_init = false;
+        //     stop_depth = -1;
+        //     last_node = -1;
+        // }
+        
+        if (limit_insertion && history_table.get_current_size() < history_table.get_max_size() && problem_state.current_path.size() >= inhis_depth) { //don't add if it was already added
+            push_to_history_table(problem_state.history_key,lb_liminsert,NULL,false);
+        }
 
-    // if (stop_init && (int)problem_state.cur_solution.size() <= stop_depth) {
-    //     stop_init = false;
-    //     stop_depth = -1;
-    //     last_node = -1;
-    // }
-    
-    if (limit_insertion && history_table.get_current_size() < history_table.get_max_size() && problem_state.current_path.size() >= inhis_depth) { //don't add if it was already added
-        push_to_history_table(problem_state.history_key,lb_liminsert,NULL,false);
-    }
-
-    // cur_active_tree.pop_back(stop_init,Allocator);
+        // cur_active_tree.pop_back(stop_init,Allocator);
 
         if(problem_state.enumeration_depth != 0 || !workload_request())
             return;
