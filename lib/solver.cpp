@@ -547,7 +547,6 @@ void solver::solve_parallel() {
         Thread_manager[i] = thread(&solver::enumerate,move(solvers[i]));
         active_threads++;
     }
-std::cout << "Begins enumeration" << std::endl; //TODO: remove; only sometimes reaches here, because something is happening in enumerate
     for (int i = 0; i < thread_total; i++) { //waits until every thread is finished
         if (Thread_manager[i].joinable()) {
             Thread_manager[i].join();
@@ -558,7 +557,6 @@ std::cout << "Begins enumeration" << std::endl; //TODO: remove; only sometimes r
     //active_threads = 0;
 
     //BB_Complete = true;
-std::cout << "Successfully joined all threads" << std::endl; //TODO: remove
     if (time_out) cout << "instance timed out " << endl;
 
     // if (time_out || (GPQ.Unknown.empty() && GPQ.Abandoned.empty())) {
@@ -616,12 +614,17 @@ void solver::enumerate(){
                         continue;
                     }
                 }else{ //complete solution
-                    best_solution_lock.lock();
-                    if(problem_state.current_cost < best_cost){
-                        best_cost = problem_state.current_cost;
-                        best_solution = problem_state.current_path;
+                    if(problem_state.current_cost < best_cost) {
+                        best_solution_lock.lock();
+                        if(problem_state.current_cost < best_cost) { //make sure it is still true
+                            best_cost = problem_state.current_cost;
+                            best_solution = problem_state.current_path;
+
+                            std::cout << "Best Cost = " << best_cost << " Found in Thread " << thread_id;
+                            std::cout << " at time = " << std::chrono::duration<double>(std::chrono::system_clock::now() - solver_start_time).count() << " [" << /*thread_load[thread_id].data_cnt <<*/ " ]" << std::endl; //TODO: what is thread_load for
+                        }
+                        best_solution_lock.unlock();
                     }
-                    best_solution_lock.unlock();
 
 
                 }
