@@ -39,8 +39,8 @@
     static sop_state default_state;                     //state of a solver before the first node was taken
     //static vector<Hungarian> initial_hungarian_state;   //for each thread, the Hungarian solver as it began
     static History_Table history_table(TABLE_SIZE);     //the history table
-    static vector<path_node> global_pool;               //a global pool of nodes that haven't yet been processed by any thread
-    static local_pool* local_pools;                     //each thread's local pool, with the internal tools to manage them
+    static vector<path_node> global_pool;               //a global pool of nodes that haven't yet been processed by any thread, only ever take from the back
+    static local_pool* local_pools;                     //each thread's local pool, with the internal tools to manage them, only ever take from the back
     
 
     static vector<int> best_solution;               //the lowest cost solution found so far in any thread
@@ -179,6 +179,7 @@ void solver::solve(string f_name, int thread_num) {
 
     //if (enable_lkh) thread_total = thread_num - 1;
     else thread_total = thread_num;
+    // if (thread_num < 2) enable_workstealing = false; //you can't steal work if there is only one BB thread
     filename = f_name;
 
     retrieve_input();
@@ -201,7 +202,7 @@ void solver::solve(string f_name, int thread_num) {
     best_solution = nearest_neighbor(&temp_solution);
     std::cout << "Initial Best Solution Is " << best_cost << std::endl;
 
-    //I DON'T KNOW WHAT THIS IS FOR
+    //necessary for LKH
     // bestBB_tour = new int[instance_size];
     // for (int i = 0; i < instance_size; i++) bestBB_tour[i] = best_solution[i] + 1;
 
@@ -486,14 +487,13 @@ void solver::solve_parallel() {
     boost::container::vector<bool> origin_taken_arr = boost::container::vector<bool>(instance_size,false);
     while (thread_cnt < thread_total) { //continue, even taking duplicates from the same origin, in order to get work for every thread
         fill(origin_taken_arr.begin(),origin_taken_arr.end(),false); //to more evenly distribute work, only one child of each of the first generation should be taken
-        for (long unsigned int i = 0; i < global_pool.size(); i++) { 
+        for (int i = global_pool.size() - 1; i >= 0; i--) { //only ever take from the back of the global_pool, which is the best lower_bound
             if (thread_cnt >= thread_total) break;
             unsigned origin = global_pool[i].origin_node;
 
             if (!origin_taken_arr[origin]) {
                 path_node problem = global_pool[i];
-                global_pool.erase(global_pool.begin()+i);
-                solvers[thread_cnt].problem_state = generate_solver_state(problem);
+                global_pool.erase(global_pool.begin()+i); //remove from the pool
 
                 solvers[thread_cnt].problem_state = default_state;
                 int taken_node = -1;
@@ -1154,18 +1154,19 @@ bool solver::workload_request(){
         global_pool_lock.unlock();
     }
 
-   
-    active_threads--;
-    while(true){
-        int target = local_pools->choose_victim(thread_id);
-        if(local_pools->pop_from_zero_list(target, new_node)){
-            problem_state = generate_solver_state(new_node);
-            return true;
-        }
-        if(active_threads == 0)
-            return false;
-    }
-    active_threads++;
+    // if (enable_workstealing) {
+    //     active_threads--;
+    //     while(true){
+    //         int target = local_pools->choose_victim(thread_id);
+    //         if(local_pools->pop_from_zero_list(target, new_node)){
+    //             problem_state = generate_solver_state(new_node);
+    //             return true;
+    //         }
+    //         if(active_threads == 0)
+    //             return false;
+    //     }
+    //     active_threads++;
+    // }
     return false;
 }
 
@@ -1191,11 +1192,11 @@ sop_state solver::generate_solver_state(path_node& subproblem) {
 
     //generate history table key
     boost::dynamic_bitset<> bit_vector(instance_size, false);
-    for (auto node : problem_state.current_path) {
+    for (auto node : state.current_path) {
         bit_vector[node] = true;
     }
-    int last_element = problem_state.current_path.back();
-    problem_state.history_key = make_pair(bit_vector,last_element);
+    int last_element = state.current_path.back();
+    state.history_key = make_pair(bit_vector,last_element);
 
     
     // cur_active_tree.generate_path(sequence_node.partial_active_path);
