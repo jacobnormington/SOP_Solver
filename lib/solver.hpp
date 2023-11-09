@@ -51,7 +51,7 @@
         Since sop_state is a struct, it is always passed by value. */
     struct sop_state {
         std::vector<int> current_path; //the current partial path being considered
-        int current_cost; //sum cost of the current_path
+        int current_cost = 0; //sum cost of the current_path
         /*  for each node, whether it is included in the current path
             This typing is required because of the special behavior of std::vector<bool> that is implemented as a bitset instead of an iterable C array. */
         boost::container::vector<bool> taken_arr; 

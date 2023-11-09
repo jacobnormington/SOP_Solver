@@ -32,7 +32,7 @@
 ///////////Shared Resources//////////////
     static vector<vector<edge>> cost_graph;         //n by n matrix with the cost from node i to node j
     static vector<vector<int>> dependency_graph;    //list for each node i of every node j that is dependent on it
-    static vector<vector<edge>> in_degree;          //list for each node i of every node j that it is dependent on (in edge format)
+    static vector<vector<edge>> in_degree;          //list for each node i of every node j that it is dependent on (in edge format) i.e. what nodes must precede it
     static vector<vector<edge>> hungarian_graph;    //graph in the format that the Hungarian algorithm requires
     static vector<vector<int>> outgoing_graph;
 
@@ -215,6 +215,7 @@ void solver::solve(string f_name, int thread_num) {
     problem_state.hungarian_solver.start();
     problem_state.depCnt = vector<int>(instance_size,0);
     problem_state.taken_arr = boost::container::vector<bool>(instance_size,false);
+    problem_state.current_cost = 0; //TODO: this shouldn't be necessary, since it is in the struct definition, but it seems to be, investigate
 
     for (int i = 0; i < instance_size; i++) {
         for (unsigned k = 0; k < dependency_graph[i].size(); k++) {
@@ -319,7 +320,7 @@ void solver::solve_parallel() {
     for (int vertex : dependency_graph[0]) problem_state.depCnt[vertex]--;
     for (int i = 0; i < instance_size; i++) {
         if (!problem_state.depCnt[i] && !problem_state.taken_arr[i]) {
-            //Push vertices with 0 depCnt into the ready list, unless they are already taken
+            //Push vertices with 0 dependencies into the ready list, unless they are already taken
             ready_list.push_back(node(i));
         }
     }
@@ -331,6 +332,7 @@ void solver::solve_parallel() {
 
     //Process first generation of nodes (the ready list as defined above)
     sop_state initial_state = problem_state;
+    std::cout << "Initial Cost is " << initial_state.current_cost << std::endl; //TODO: remove
     // if (enable_progress_estimation)
     // {
     //     child_node_value = ULLONG_MAX / ready_list.size();
@@ -470,9 +472,8 @@ void solver::solve_parallel() {
     delete solver_container;
     /* End Splitting Operation */
 
-    //std::cout << "GPQ initial depth is " << global_pool.back().cur_solution.size() << std::endl;
-    //std::cout << "Initial GPQ size is " << global_pool.size() << std::endl;
-    //calculate_standard_deviation();
+    // std::cout << "GPQ initial depth is " << global_pool.back().sequence.size() << std::endl; //TODO: comment both lines out
+    // std::cout << "Initial GPQ size is " << global_pool.size() << std::endl;
     // std::cout << "Global Pool: " << std::endl;
     // for (long unsigned int i = 0; i < global_pool.size(); i++)
     // {
@@ -509,6 +510,10 @@ void solver::solve_parallel() {
                     solvers[thread_cnt].problem_state.taken_arr[taken_node] = true;
                     for (int vertex : dependency_graph[taken_node]) solvers[thread_cnt].problem_state.depCnt[vertex]--;
                     solvers[thread_cnt].problem_state.current_cost += cost_graph[cur_node][taken_node].weight;
+                    //TODO: remove
+                    // std::cout << "node" << std::endl;
+                    // std::cout << cost_graph[cur_node][taken_node].weight << std::endl;
+                    // std::cout << solvers[thread_cnt].problem_state.current_cost << std::endl;
                     solvers[thread_cnt].problem_state.hungarian_solver.fix_row(cur_node, taken_node);
                     solvers[thread_cnt].problem_state.hungarian_solver.fix_column(taken_node, cur_node);
                 }
@@ -568,13 +573,37 @@ void solver::solve_parallel() {
 }
 
 void solver::enumerate(){
+    //TODO: remove
+    // for (int i = 0; i < (int) problem_state.current_path.size(); i++)
+    //     std::cout << problem_state.current_path[i] << ", ";
+    // std::cout << std::endl;
+    // std::cout << "cost = " << problem_state.current_cost << std::endl;
+
+    //print cost-graph corner
+    // for (int i = 0; i < 10; i++) {
+    //     std::cout << "[" << i << "]";
+    //     for (int j = 0; j < 10; j++) {
+    //         std::cout << " " << cost_graph[i][j].weight;
+    //     }
+    //     std::cout << std::endl;
+    // }
+
+    // for (int i = 0; i < 10; i++) {
+    //     std::cout << "[" << i << "]";
+    //     for (int j = 0; j < dependency_graph[i].size(); j++) {
+    //         std::cout << " " << dependency_graph[i][j];
+    //     }
+    //     std::cout << std::endl;
+    // }
+
+    //exit(EXIT_FAILURE);
+    //END REMOVED
+
     while(!time_out){
         deque<path_node> ready_list;
         bool limit_insertion = false;
-
         for(int taken_node = 0; taken_node < instance_size; taken_node++){
-            if(!problem_state.depCnt[taken_node] && !problem_state.taken_arr[taken_node]){
-                
+            if(!problem_state.depCnt[taken_node] && !problem_state.taken_arr[taken_node]){ //only consider nodes that haven't already been taken, and who have no remaining dependencies
                 //triming
                 int source_node = problem_state.current_path.back();
                 problem_state.current_path.push_back(taken_node);
@@ -586,34 +615,13 @@ void solver::enumerate(){
                 HistoryNode* his_node = NULL;
                 //Active_Node* active_node = NULL;
 
-                bool decision = history_utilization(problem_state.history_key,problem_state.current_cost,&lower_bound,&taken,&his_node);
-                //enumerated_nodes[thread_id].val++;
+                if(problem_state.current_cost >= best_cost){ //backtracking
+                    prune(source_node, taken_node);
+                    continue;
+                }
 
-                if(((int) problem_state.current_path.size()) < instance_size ){ // if the current solution is not complete
-                    if(problem_state.current_cost >= best_cost){ //if the current cost is worse than the best cost
-                        prune(source_node, taken_node);
-                        continue;
-                    }
-                    if (!taken) { //if there is no similar entry in the history table
-                        lower_bound = dynamic_hungarian(source_node, taken_node);
-                        if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size()) push_to_history_table(problem_state.history_key,lower_bound,&his_node,false);
-                        else limit_insertion = true;
-                    }
-                    else if (taken && !decision) { //if this path is dominated by another path
-                        prune(source_node, taken_node);
-                        continue;
-                    }
-
-                    if (lower_bound >= best_cost) {
-                        if (his_node != NULL) {
-                            HistoryContent content = his_node->entry.load();
-                            if (content.prefix_cost >= problem_state.current_cost) his_node->explored = true;
-                        }
-
-                        prune(source_node, taken_node);
-                        continue;
-                    }
-                }else{ //complete solution
+                if (problem_state.current_path.size() == (size_t)instance_size) { //if you've reached a leaf node (complete solution)
+                    std::cout << "leaf" << std::endl;
                     if(problem_state.current_cost < best_cost) {
                         best_solution_lock.lock();
                         if(problem_state.current_cost < best_cost) { //make sure it is still true
@@ -625,9 +633,31 @@ void solver::enumerate(){
                         }
                         best_solution_lock.unlock();
                     }
-
-
+                    continue;
                 }
+
+                bool decision = history_utilization(problem_state.history_key,problem_state.current_cost,&lower_bound,&taken,&his_node);
+                //enumerated_nodes[thread_id].val++;
+                if (!taken) { //if there is no similar entry in the history table
+                    lower_bound = dynamic_hungarian(source_node, taken_node);
+                    if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size()) push_to_history_table(problem_state.history_key,lower_bound,&his_node,false);
+                    else limit_insertion = true;
+                }
+                else if (taken && !decision) { //if this path is dominated by another path
+                    prune(source_node, taken_node);
+                    continue;
+                }
+
+                if (lower_bound >= best_cost) {
+                    if (his_node != NULL) {
+                        HistoryContent content = his_node->entry.load();
+                        if (content.prefix_cost >= problem_state.current_cost) his_node->explored = true;
+                    }
+
+                    prune(source_node, taken_node);
+                    continue;
+                }
+                
 
                 //"good" node, add it to the ready_list, then reset problem state
                 path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node);
@@ -638,13 +668,6 @@ void solver::enumerate(){
                 problem_state.history_key.second = source_node;
             }
         }
-
-
-        if(((int) problem_state.current_path.size()) == instance_size - 1){ //already calculated leaf nodes
-            //TODO: purge the ready_list
-            return;
-        }
-
 
         //Sort the ready list and push into local pool
         if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
@@ -768,7 +791,7 @@ void solver::retrieve_input() {
     //inFile.open(fd_name);
     inFile.open(filename);
     if (inFile.fail()) {
-        cerr << "Error: input file " << filename << " -> " << strerror(errno) << endl;
+        cerr << "Error: cannot open input file " << filename << " -> " << strerror(errno) << endl;
         exit(EXIT_FAILURE);
     }
     else cout << "Input file is " << filename << endl;
@@ -836,7 +859,7 @@ void solver::transitive_redundancy() {
         }
     }
 
-    for(int i = 0; i < instance_size; ++i) {
+    for(int i = 0; i < instance_size; i++) {
         vector<edge> preceding_nodes;
         for (int k = 0; k < (int)dependency_graph[i].size(); k++) preceding_nodes.push_back(edge(i,dependency_graph[i][k],-1));
         unordered_set<int> expanded_nodes;
@@ -862,7 +885,7 @@ void solver::transitive_redundancy() {
         } 
     }
 
-    for(int i = 0; i < instance_size; ++i) {
+    for(int i = 0; i < instance_size; i++) {
         const vector<edge> preceding_nodes = in_degree[i];
         unordered_set<int> expanded_nodes;
         for(int j = 0; j < (int)preceding_nodes.size(); ++j){
@@ -1062,7 +1085,7 @@ bool solver::enumeration_pre_check(path_node& active_node){//true on failure
 
 void solver::prune(int source_node, int taken_node){
     //TODO: progress estimation
-    // if (enable_progress_estimation) //pruned due to history domination
+    // if (enable_progress_estimation)
     //     estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming 
 
     problem_state.current_path.pop_back();          
