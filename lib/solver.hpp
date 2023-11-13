@@ -132,7 +132,6 @@
             bool enumeration_pre_check(path_node& active_node);
             /*called when pruning a node in enumerate*/
             void prune(int source_node, int taken_node);
-            bool match_opt_200(); //TODO: remove
 
             /* Computes a dynamic lower bound based on the previous path with this node added, using the MCPM relaxation. 
                 Contains the fix and undue calls internally. 
@@ -163,7 +162,7 @@
             /* Build an sop_state based off the information in a path_node. */
             sop_state generate_solver_state(path_node& subproblem);
             /* Build a hungarian solver state based upon the problem_state. Used in generate_solver_state. */
-            void regenerate_hungstate();
+            //void regenerate_hungstate();
             //assign_workload???
             //push_to_pool???
 
@@ -171,7 +170,10 @@
             //thread_stop
 
             /* Repeatedly run LKH routine. */
-            void run_lkh();
+            //void run_lkh();
+
+            /* For diagnostics, print out an entire problem state. */
+            void print_state(sop_state &state);
 
         public:
             /* Takes config information and defines all runtime parameters from those strings. */

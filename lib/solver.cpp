@@ -129,9 +129,9 @@
 //Compare two edges in the cost graph, a and b by their weight. a > b (therefore "better"), if a.weight < b.weight
 bool compare_edge(const edge a, const edge b) { return a.weight < b.weight; }
 //TODO: ensure that this actually means that you are picking the "best" nodes, and it isn't accidentally reverse-sorted
-//sort by increasing lower bound
+//sort by decreasing lower bound (back is the best)
 bool global_pool_sort(const path_node& src, const path_node& dest) { return src.lower_bound > dest.lower_bound; }
-//sort by increasing lower bound
+//sort by decreasing lower bound (back is the best)
 bool local_pool_sort(const path_node& src, const path_node& dest)  { return src.lower_bound > dest.lower_bound; }
 
 
@@ -332,7 +332,6 @@ void solver::solve_parallel() {
 
     //Process first generation of nodes (the ready list as defined above)
     sop_state initial_state = problem_state;
-    std::cout << "Initial Cost is " << initial_state.current_cost << std::endl; //TODO: remove
     // if (enable_progress_estimation)
     // {
     //     child_node_value = ULLONG_MAX / ready_list.size();
@@ -472,7 +471,7 @@ void solver::solve_parallel() {
     delete solver_container;
     /* End Splitting Operation */
 
-    // std::cout << "GPQ initial depth is " << global_pool.back().sequence.size() << std::endl; //TODO: comment both lines out
+    // std::cout << "GPQ initial depth is " << global_pool.back().sequence.size() << std::endl;
     // std::cout << "Initial GPQ size is " << global_pool.size() << std::endl;
     // std::cout << "Global Pool: " << std::endl;
     // for (long unsigned int i = 0; i < global_pool.size(); i++)
@@ -510,10 +509,6 @@ void solver::solve_parallel() {
                     solvers[thread_cnt].problem_state.taken_arr[taken_node] = true;
                     for (int vertex : dependency_graph[taken_node]) solvers[thread_cnt].problem_state.depCnt[vertex]--;
                     solvers[thread_cnt].problem_state.current_cost += cost_graph[cur_node][taken_node].weight;
-                    //TODO: remove
-                    // std::cout << "node" << std::endl;
-                    // std::cout << cost_graph[cur_node][taken_node].weight << std::endl;
-                    // std::cout << solvers[thread_cnt].problem_state.current_cost << std::endl;
                     solvers[thread_cnt].problem_state.hungarian_solver.fix_row(cur_node, taken_node);
                     solvers[thread_cnt].problem_state.hungarian_solver.fix_column(taken_node, cur_node);
                 }
@@ -573,44 +568,11 @@ void solver::solve_parallel() {
 }
 
 void solver::enumerate(){
-    //TODO: remove
-    // for (int i = 0; i < (int) problem_state.current_path.size(); i++)
-    //     std::cout << problem_state.current_path[i] << ", ";
-    // std::cout << std::endl;
-    // std::cout << "cost = " << problem_state.current_cost << std::endl;
-    // std::cout << "key = " ;
-    // for (int i = 0; i < instance_size; i++)
-    //     std::cout << problem_state.history_key.first[i] << " ";
-    // std::cout << " -- " << problem_state.history_key.second << std::endl;
-
-    // std::cout << std::endl << "Cost Graph: " << std::endl;
-    // for (int i = 0; i < 10; i++) {
-    //     std::cout << "[" << i << "]";
-    //     for (int j = 0; j < 10; j++) {
-    //         std::cout << " " << cost_graph[i][j].weight;
-    //     }
-    //     std::cout << std::endl;
-    // }
-
-    // std::cout << std::endl << "Dependency Graph: " << std::endl;
-    // for (int i = 0; i < 10; i++) {
-    //     std::cout << "[" << i << "]";
-    //     for (int j = 0; j < dependency_graph[i].size(); j++) {
-    //         std::cout << " " << dependency_graph[i][j];
-    //     }
-    //     std::cout << std::endl;
-    // }
-
-    // exit(EXIT_FAILURE);
-    //END REMOVED
-
     while(!time_out){
         deque<path_node> ready_list;
         bool limit_insertion = false;
-        int child_num = 0; //TODO: remove
         for(int taken_node = 0; taken_node < instance_size; taken_node++){
             if(!problem_state.depCnt[taken_node] && !problem_state.taken_arr[taken_node]){ //only consider nodes that haven't already been taken, and who have no remaining dependencies
-                child_num++; //TODO: remove
                 //triming
                 int source_node = problem_state.current_path.back();
                 problem_state.current_path.push_back(taken_node);
@@ -639,8 +601,6 @@ void solver::enumerate(){
                         }
                         best_solution_lock.unlock();
                     }
-                    else
-                        std::cout << "leaf not added" << std::endl; //TODO: remove, this should basically never happen, because it should be pruned first 
 
                     prune(source_node, taken_node);
                     continue;
@@ -680,38 +640,6 @@ void solver::enumerate(){
         }
        
         //Sort the ready list and push into local pool
-        int total_size = child_num + problem_state.current_path.size();
-        int old_size = ready_list.size(); //TODO: remove
-        if (total_size != 200 && total_size != 199) { //because the last node won't be in ready_list, but all other nodes untaken will be
-            //TODO: remove this
-            std::cout << "Possible failure -- at ready_list" << std::endl;
-            std::cout << total_size << " = " << child_num << " + " << problem_state.current_path.size() << std::endl;
-            std::cout << "Ready List: ";
-            for (int i = 0; i < (int) ready_list.size(); i++)
-                std::cout << ready_list[i].sequence.back() << " ";
-            std::cout << std::endl;
-            std::cout << "Path: ";
-            for (int i = 0; i < (int) problem_state.current_path.size(); i++)
-                std::cout << problem_state.current_path[i] << " ";
-            std::cout << std::endl;
-            std::cout << "Cost: " << problem_state.current_cost << std::endl;
-            std::cout << "Lower Bound: " << problem_state.lower_bound << std::endl;
-            std::cout << "Origin: " << problem_state.origin_node << std::endl;
-            std::cout << "Key: " ;
-            for (int i = 0; i < instance_size; i++)
-                std::cout << problem_state.history_key.first[i] << " ";
-            std::cout << " -- " << problem_state.history_key.second << std::endl;
-            std::cout << "Taken: ";
-            for (int i = 0; i < (int) problem_state.taken_arr.size(); i++)
-                std::cout << problem_state.taken_arr[i] << " ";
-            std::cout << std::endl;
-            std::cout << "Unfulfilled Dependencies: ";
-            for (int i = 0; i < (int) problem_state.depCnt.size(); i++)
-                std::cout << problem_state.depCnt[i] << " ";
-            std::cout << std::endl;
-            std::cout << "Done" << std::endl;
-            exit(EXIT_FAILURE);
-        }
         if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
         local_pools->push_list(thread_id, ready_list);
 
@@ -726,11 +654,7 @@ void solver::enumerate(){
 
         /* Begin enumeration. */
         path_node active_node;
-        child_num = 0; //TODO: remove
-        if (old_size != local_pools->active_pool_size(thread_id)) //TODO: remove
-            std::cout << "Pre-enumeration-loop mismatch: " << old_size << " = " << local_pools->active_pool_size(thread_id) << " = "<< std::endl;
         while (local_pools->pop_from_active_list(thread_id, active_node)){
-            child_num++; //TODO: remove
             if(enumeration_pre_check(active_node)) continue; //enumeration-time backtracking, and other preprocessing
 
             // if (abandon_share || abandon_work) { //should both be in enumeration_pre_check
@@ -804,38 +728,8 @@ void solver::enumerate(){
             
 
         }
+        local_pools->pop_active_list(thread_id); //TODO: make sure with thread stopping that this is handled properly
 
-        local_pools->pop_active_list(thread_id);
-
-        if (old_size != child_num) { //TODO: remove
-            std::cout << "Possible failure -- at enumeration loop" << std::endl;
-            std::cout << old_size << " = " << child_num << std::endl;
-            std::cout << "Ready List: ";
-            for (int i = 0; i < (int) ready_list.size(); i++)
-                std::cout << ready_list[i].sequence.back() << " ";
-            std::cout << std::endl;
-            std::cout << "Path: ";
-            for (int i = 0; i < (int) problem_state.current_path.size(); i++)
-                std::cout << problem_state.current_path[i] << " ";
-            std::cout << std::endl;
-            std::cout << "Cost: " << problem_state.current_cost << std::endl;
-            std::cout << "Lower Bound: " << problem_state.lower_bound << std::endl;
-            std::cout << "Origin: " << problem_state.origin_node << std::endl;
-            std::cout << "Key: " ;
-            for (int i = 0; i < instance_size; i++)
-                std::cout << problem_state.history_key.first[i] << " ";
-            std::cout << " -- " << problem_state.history_key.second << std::endl;
-            std::cout << "Taken: ";
-            for (int i = 0; i < (int) problem_state.taken_arr.size(); i++)
-                std::cout << problem_state.taken_arr[i] << " ";
-            std::cout << std::endl;
-            std::cout << "Unfulfilled Dependencies: ";
-            for (int i = 0; i < (int) problem_state.depCnt.size(); i++)
-                std::cout << problem_state.depCnt[i] << " ";
-            std::cout << std::endl;
-            std::cout << "Done" << std::endl;
-            exit(EXIT_FAILURE);
-        }
         // if (stop_init && (int)problem_state.cur_solution.size() <= stop_depth) {
         //     stop_init = false;
         //     stop_depth = -1;
@@ -1026,10 +920,6 @@ size_t solver::transitive_closure(vector<vector<int>>& isucc_graph) {
     return node_num;
 }
 
-// void solver::local_pool_config(float precedence_density) {
-//     //
-// }
-
 vector<int> solver::nearest_neighbor(vector<int>* partial_solution) {
     vector<int> solution;
     int current_node;
@@ -1145,7 +1035,7 @@ bool solver::enumeration_pre_check(path_node& active_node){
     if (active_node.lower_bound >= best_cost 
         // || stop_init
         // || (enable_threadstop && active_node.his_entry != NULL 
-        //                       && active_node.his_entry->Entry.load().prefix_cost < active_node.partial_cost)
+        //                       && active_node.his_entry->Entry.load().prefix_cost < active_node.partial_cost) //TODO: thread stopping
        )
     {   
         // if (enable_progress_estimation) //pruning due to enumeration-time backtracking
@@ -1166,29 +1056,6 @@ void solver::prune(int source_node, int taken_node){
     // if (enable_progress_estimation)
     //     estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming 
 
-    if (match_opt_200() && problem_state.current_path.size() != 200) { //break if you just pruned the optimal solution
-        std::cout << "Path: ";
-        for (int i = 0; i < (int) problem_state.current_path.size(); i++)
-            std::cout << problem_state.current_path[i] << " ";
-        std::cout << std::endl;
-        std::cout << "Cost: " << problem_state.current_cost << std::endl;
-        std::cout << "Lower Bound: " << problem_state.lower_bound << std::endl;
-        std::cout << "Origin: " << problem_state.origin_node << std::endl;
-        std::cout << "Key: " ;
-        for (int i = 0; i < instance_size; i++)
-            std::cout << problem_state.history_key.first[i] << " ";
-        std::cout << " -- " << problem_state.history_key.second << std::endl;
-        std::cout << "Taken: ";
-        for (int i = 0; i < (int) problem_state.taken_arr.size(); i++)
-            std::cout << problem_state.taken_arr[i] << " ";
-        std::cout << std::endl;
-        std::cout << "Unfulfilled Dependencies: ";
-        for (int i = 0; i < (int) problem_state.depCnt.size(); i++)
-            std::cout << problem_state.depCnt[i] << " ";
-        std::cout << std::endl;
-        std::cout << "Done" << std::endl;
-        exit(EXIT_FAILURE); 
-    }
     problem_state.current_path.pop_back();          
     problem_state.current_cost -= cost_graph[source_node][taken_node].weight;
     problem_state.history_key.first[taken_node] = false;
@@ -1221,7 +1088,7 @@ bool solver::history_utilization(Key& key,int cost, int* lowerbound, bool* found
     //int target_ID = history_node->active_threadID; //find whoever was working in this subspace
     int imp = content.prefix_cost - cost;
     
-    if (!history_node->explored) {
+    if (!history_node->explored) { //TODO: thread stopping
         // if (enable_threadstop && active_threads > 0) { //then issue thread stop request, since this path is superior
         //     buffer_lock.lock();
         //     if (request_buffer.empty() || request_buffer.front().target_thread != target_ID || request_buffer.front().target_depth > (int)problem_state.current_path.size()) {
@@ -1337,30 +1204,9 @@ sop_state solver::generate_solver_state(path_node& subproblem) {
     // solvers[thread_cnt].problem_state.initial_depth = solvers[thread_cnt].problem_state.cur_solution.size();
     // solvers[thread_cnt].problem_state.current_node_value = problem.current_node_value; //for progress estimation
 
-    /* BEGIN PRINT STATE */ //TODO: remove
     // std::cout << "New SOP state" << std::endl;
-    // std::cout << "Path: ";
-    // for (int i = 0; i < (int) state.current_path.size(); i++)
-    //     std::cout << state.current_path[i] << " ";
-    // std::cout << std::endl;
-    // std::cout << "Cost: " << state.current_cost << std::endl;
-    // std::cout << "Lower Bound: " << state.lower_bound << std::endl;
-    // std::cout << "Origin: " << state.origin_node << std::endl;
-    // std::cout << "Key: " ;
-    // for (int i = 0; i < instance_size; i++)
-    //     std::cout << state.history_key.first[i] << " ";
-    // std::cout << " -- " << state.history_key.second << std::endl;
-    // std::cout << "Taken: ";
-    // for (int i = 0; i < (int) state.taken_arr.size(); i++)
-    //     std::cout << state.taken_arr[i] << " ";
-    // std::cout << std::endl;
-    // std::cout << "Unfulfilled Dependencies: ";
-    // for (int i = 0; i < (int) state.depCnt.size(); i++)
-    //     std::cout << state.depCnt[i] << " ";
-    // std::cout << std::endl;
-    // std::cout << "Done" << std::endl;
-    // exit(EXIT_FAILURE); 
-    /* END PRINT STATE */
+    // print_state(state);
+    // exit(EXIT_FAILURE);
 
     return state;
 }
@@ -1385,18 +1231,30 @@ sop_state solver::generate_solver_state(path_node& subproblem) {
 // }
 /* END LKH */
 
-bool solver::match_opt_200() //TODO: remove
-{
-    int opt [] = {0,49,33,132,170,5,157,63,127,92,135,148,10,128,114,14,64,98,160,21,182,81,107,193,89,111,134,106,93,59,156,43,48,31,110,144,185,117,34,102,12,85,40,130,103,137,45,30,36,19,181,176,62,195,82,50,116,179,163,13,35,42,88,159,54,1,52,3,188,72,16,131,124,141,79,140,58,55,18,74,91,83,108,29,169,178,24,69,175,166,145,180,99,138,104,122,90,115,101,4,109,167,151,194,165,39,60,153,56,164,47,57,41,15,53,150,192,65,26,28,61,184,197,113,112,11,154,77,86,198,161,9,37,123,125,196,100,190,149,7,38,191,51,158,84,152,96,177,147,87,118,136,66,67,80,155,129,17,78,174,8,76,68,142,172,187,162,25,146,119,143,94,70,186,32,22,27,189,120,95,75,71,2,139,133,23,173,126,105,20,121,46,44,183,168,73,97,171,6,199};
-    for (int i = 0; i < (int) problem_state.current_path.size(); i++)
-    {
-        if (opt[i] != problem_state.current_path[i])
-            return false;
-    }
-    return true;
+/* BEGIN DIAGNOSTIC FUNCTIONS */
+
+void solver::print_state(sop_state& state) {
+    std::cout << "Path: ";
+    for (int i = 0; i < (int) state.current_path.size(); i++)
+        std::cout << state.current_path[i] << " ";
+    std::cout << std::endl;
+    std::cout << "Cost: " << state.current_cost << std::endl;
+    std::cout << "Lower Bound: " << state.lower_bound << std::endl;
+    std::cout << "Origin: " << state.origin_node << std::endl;
+    std::cout << "Key: " ;
+    for (int i = 0; i < instance_size; i++)
+        std::cout << state.history_key.first[i] << " ";
+    std::cout << " -- " << state.history_key.second << std::endl;
+    std::cout << "Taken: ";
+    for (int i = 0; i < (int) state.taken_arr.size(); i++)
+        std::cout << state.taken_arr[i] << " ";
+    std::cout << std::endl;
+    std::cout << "Unfulfilled Dependencies: ";
+    for (int i = 0; i < (int) state.depCnt.size(); i++)
+        std::cout << state.depCnt[i] << " ";
+    std::cout << std::endl;
 }
-
-
+/* END DIAGNOSTIC FUNCTIONS */
 
 
 // bool shared_pool_sort(const path_node& src, const path_node& dest) {

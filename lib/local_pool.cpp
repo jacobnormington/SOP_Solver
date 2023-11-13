@@ -1,5 +1,4 @@
 #include "local_pool.hpp"
-#include <iostream>
 
     bool local_pool::pop_from_zero_list(int thread_number, path_node &result_node){
         if (pools[thread_number].size() <= 1)
@@ -11,8 +10,8 @@
             return false;
         }
 
-        result_node = pools[thread_number].front().front();
-        pools[thread_number].front().pop_front();
+        result_node = pools[thread_number].front().back();
+        pools[thread_number].front().pop_back();
 
         if (pools[thread_number].front().empty()){
             pools[thread_number].pop_front();
