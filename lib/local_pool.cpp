@@ -1,4 +1,5 @@
 #include "local_pool.hpp"
+#include <iostream>
 
     bool local_pool::pop_from_zero_list(int thread_number, path_node &result_node){
         if (pools[thread_number].size() <= 1)
@@ -22,6 +23,8 @@
     };
 
     bool local_pool::pop_from_active_list(int thread_number, path_node &result_node){
+
+        //std::cout << "popping at depth " << pools[thread_number].size() <<std::endl;
         if (pools[thread_number].size() == 0)
             return false;
         if (pools[thread_number].size() == 1){
@@ -35,8 +38,8 @@
             return false;
         }
 
-        result_node = pools[thread_number].back().front();
-        pools[thread_number].back().pop_front();
+        result_node = pools[thread_number].back().back();
+        pools[thread_number].back().pop_back();
 
         if (pools[thread_number].size() == 1){
             locks[thread_number].unlock();

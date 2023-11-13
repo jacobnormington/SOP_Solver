@@ -678,7 +678,7 @@ void solver::enumerate(){
                 problem_state.history_key.second = source_node;
             }
         }
-
+       
         //Sort the ready list and push into local pool
         int total_size = child_num + problem_state.current_path.size();
         int old_size = ready_list.size(); //TODO: remove
@@ -723,7 +723,6 @@ void solver::enumerate(){
         
         //CheckStop_Request();
         
-
 
         /* Begin enumeration. */
         path_node active_node;
@@ -798,12 +797,16 @@ void solver::enumerate(){
                 if (std::chrono::duration<double>(cur_time - solver_start_time).count() > t_limit){
                     time_out = true;
                     active_threads = 0;
+                    local_pools->pop_active_list(thread_id);
                     return;
                 }
             }
             
 
         }
+
+        local_pools->pop_active_list(thread_id);
+
         if (old_size != child_num) { //TODO: remove
             std::cout << "Possible failure -- at enumeration loop" << std::endl;
             std::cout << old_size << " = " << child_num << std::endl;
