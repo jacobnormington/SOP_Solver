@@ -64,7 +64,7 @@
         Hungarian hungarian_solver;
 
         pair<boost::dynamic_bitset<>,int> history_key;
-        HistoryNode* cur_parent_hisnode = NULL;
+        //HistoryNode* cur_parent_hisnode = NULL;
         
         int enumeration_depth = 0; // the depth of the enumeration recursion stack
 
@@ -97,10 +97,10 @@
             // bool speed_search = false;
             // int lb_curlv = INT_MAX;
 
-            // //Restart
+            //Restart
             // int concentrate_lv = 0;
 
-            // //Thread Stopping
+            //Thread Stopping
             // int stop_depth = -1;
             // int last_node = -1;
             // bool stop_init = false; //INVESTIGATE; might be whether this thread has ever been stopped before
@@ -132,6 +132,7 @@
             bool enumeration_pre_check(path_node& active_node);
             /*called when pruning a node in enumerate*/
             void prune(int source_node, int taken_node);
+            bool match_opt_200(); //TODO: remove
 
             /* Computes a dynamic lower bound based on the previous path with this node added, using the MCPM relaxation. 
                 Contains the fix and undue calls internally. 

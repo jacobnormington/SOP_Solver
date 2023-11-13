@@ -71,3 +71,7 @@
         workstealing_lock.unlock();
         return return_value;
     }
+
+    int local_pool::active_pool_size(int thread_number) { //TODO: this is not strictly necessary
+        return pools[thread_number].back().size();
+    }

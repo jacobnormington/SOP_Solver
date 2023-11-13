@@ -40,6 +40,7 @@
                 thread_number - this thread's number, to ensure you aren't recommended to steal from yourself
                 Return - the thread number of the thread to steal from */
             int choose_victim(int thread_number);
+            int active_pool_size(int thread_number); //TODO: this is not strictly necessary
     };
 
 #endif
