@@ -261,6 +261,17 @@ void solver::solve(string f_name, int thread_num) {
     
     ///// BEGIN DIAGNOSTICS /////
 
+    int total_cost = 0;
+    std::cout << "Final solution: " << best_solution[0] << " ";
+    for (int i = 1; i < (int) best_solution.size(); i++) {
+        std::cout << best_solution[i] << " ";
+        int src = best_solution[i-1];
+        int dst = best_solution[i];
+        total_cost += cost_graph[src][dst].weight;
+    }
+    std::cout << std::endl;
+    std::cout << "Cost of final solution is: " << total_cost << ", Reported: " << best_cost << std::endl;
+
     // for (int i = 0; i < thread_total; i++) {
     //     cout << "--------------------------------------------------------" << endl;
     //     cout << "Thread " << i << ": Steal Count = " << steal_cnt[i] << endl;
