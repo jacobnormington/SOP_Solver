@@ -522,6 +522,7 @@ void solver::solve_parallel() {
                     solvers[thread_cnt].problem_state.current_cost += cost_graph[cur_node][taken_node].weight;
                     solvers[thread_cnt].problem_state.hungarian_solver.fix_row(cur_node, taken_node);
                     solvers[thread_cnt].problem_state.hungarian_solver.fix_column(taken_node, cur_node);
+                    cur_node = taken_node; //TODO: Not sure if this is correct
                 }
 
                 solvers[thread_cnt].problem_state.origin_node = problem.origin_node;
@@ -580,6 +581,16 @@ void solver::solve_parallel() {
 
 void solver::enumerate(){
     while(!time_out){
+        //DIAGNOSTIC:
+        int actual_cost = 0;
+
+        for(int i = 0 ; i < problem_state.current_path.size() - 1; i++)
+            actual_cost += cost_graph[problem_state.current_path[i]][problem_state.current_path[i + 1]].weight;
+            
+        if(actual_cost != problem_state.current_cost){
+            cout << "at depth " << problem_state.current_path.size();
+            cout << "   actual cost: " << actual_cost << "   current cost: " << problem_state.current_cost <<endl;
+        }
         deque<path_node> ready_list;
         bool limit_insertion = false;
         for(int taken_node = 0; taken_node < instance_size; taken_node++){
