@@ -365,7 +365,7 @@ void solver::solve_parallel() {
         initial_state.current_path.push_back(taken_node);
         initial_state.taken_arr[taken_node] = true;
         for (int vertex : dependency_graph[taken_node]) initial_state.depCnt[vertex]--;
-        initial_state.current_cost += cost_graph[cur_node][taken_node].weight;
+        initial_state.current_cost += cost_graph[cur_node][taken_node].weight; //technically, this is always 0, but required for strict correctness
         
         initial_state.hungarian_solver.fix_row(cur_node, taken_node);
         initial_state.hungarian_solver.fix_column(taken_node, cur_node);
@@ -582,15 +582,15 @@ void solver::solve_parallel() {
 void solver::enumerate(){
     while(!time_out){
         //DIAGNOSTIC:
-        int actual_cost = 0;
-
-        for(int i = 0 ; i < problem_state.current_path.size() - 1; i++)
-            actual_cost += cost_graph[problem_state.current_path[i]][problem_state.current_path[i + 1]].weight;
+        // int actual_cost = 0;
+        // for(int i = 0 ; i < (int) problem_state.current_path.size() - 1; i++)
+        //     actual_cost += cost_graph[problem_state.current_path[i]][problem_state.current_path[i + 1]].weight;
             
-        if(actual_cost != problem_state.current_cost){
-            cout << "at depth " << problem_state.current_path.size();
-            cout << "   actual cost: " << actual_cost << "   current cost: " << problem_state.current_cost <<endl;
-        }
+        // if(actual_cost != problem_state.current_cost){
+        //     cout << "at depth " << problem_state.current_path.size();
+        //     cout << "   actual cost: " << actual_cost << "   current cost: " << problem_state.current_cost <<endl;
+        // }
+
         deque<path_node> ready_list;
         bool limit_insertion = false;
         for(int taken_node = 0; taken_node < instance_size; taken_node++){
@@ -1204,6 +1204,7 @@ sop_state solver::generate_solver_state(path_node& subproblem) {
         state.current_cost += cost_graph[cur_node][taken_node].weight;
         state.hungarian_solver.fix_row(cur_node, taken_node);
         state.hungarian_solver.fix_column(taken_node, cur_node);
+        cur_node = taken_node;
     }
 
     //generate history table key
