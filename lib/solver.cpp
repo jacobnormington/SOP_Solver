@@ -11,9 +11,9 @@
     //from config file
     static int t_limit = 0;                         //time limit, in seconds
     static int global_pool_size = 0;                //Minimum size of the global pool at before enumeration begins
-    static int local_depth = 0;                     //Minimum size to maintain in the local pool
+    // static int local_depth = 0;                     //Minimum size to maintain in the local pool
     static float inhis_mem_limit = -1;              //0-1, the percentage of memory usage beyond which new entries shouldn't be added to the history table
-    static unsigned int inhis_depth = -1;           //after inhis_mem_limit exceeded, will still add an entry if the current depth is less than inhis_depth
+    // static unsigned int inhis_depth = -1;           //after inhis_mem_limit exceeded, will still add an entry if the current depth is less than inhis_depth
     // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
     // group_sample_time                            //period on which to schedule thread restart
     // static int tgroup_ratio = 0;                 //
@@ -141,13 +141,13 @@ void solver::assign_parameter(vector<string> setting) {
 
     global_pool_size = atoi(setting[1].c_str());
     std::cout << "GPQ size = " << global_pool_size << std::endl;
-    local_depth = atoi(setting[2].c_str());
-    std::cout << "LPQ depth = " << local_depth << std::endl;
+    // local_depth = atoi(setting[2].c_str());
+    // std::cout << "LPQ depth = " << local_depth << std::endl; //TODO: this probably doesn't mean anything anymore??? presumably to be removed 
 
     inhis_mem_limit = atof(setting[3].c_str());
     std::cout << "History table mem limit = " << inhis_mem_limit << std::endl;
-    inhis_depth = atof(setting[4].c_str());
-    std::cout << "History table depth to always add = " << inhis_depth << std::endl;
+    // inhis_depth = atof(setting[4].c_str());
+    // std::cout << "History table depth to always add = " << inhis_depth << std::endl;
 
     // exploitation_per = atof(setting[5].c_str())/float(100);
     // std::cout << "Restart exploitation/exploration ratio is " << exploitation_per << std::endl;
@@ -255,22 +255,22 @@ void solver::solve(string f_name, int thread_num) {
     //if (enable_lkh) if (LKH_thread.joinable()) LKH_thread.join();
 
     auto total_time = chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
-    cout << "------------------------" << thread_total << " thread" << "------------------------------" << endl;
-    cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << endl;
+    std::cout << "------------------------" << thread_total << " thread" << "------------------------------" << std::endl;
+    std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl << std::endl;
     
     
     ///// BEGIN DIAGNOSTICS /////
 
-    int total_cost = 0;
-    std::cout << "Final solution: " << best_solution[0] << " ";
-    for (int i = 1; i < (int) best_solution.size(); i++) {
-        std::cout << best_solution[i] << " ";
-        int src = best_solution[i-1];
-        int dst = best_solution[i];
-        total_cost += cost_graph[src][dst].weight;
-    }
-    std::cout << std::endl;
-    std::cout << "Cost of final solution is: " << total_cost << ", Reported: " << best_cost << std::endl;
+    // int total_cost = 0;
+    // std::cout << "Final solution: " << best_solution[0] << " ";
+    // for (int i = 1; i < (int) best_solution.size(); i++) {
+    //     std::cout << best_solution[i] << " ";
+    //     int src = best_solution[i-1];
+    //     int dst = best_solution[i];
+    //     total_cost += cost_graph[src][dst].weight;
+    // }
+    // std::cout << std::endl;
+    // std::cout << "Cost of final solution is: " << total_cost << ", Reported: " << best_cost << std::endl << std::endl;
 
     // for (int i = 0; i < thread_total; i++) {
     //     cout << "--------------------------------------------------------" << endl;
@@ -634,6 +634,7 @@ void solver::enumerate(){
                     lower_bound = dynamic_hungarian(source_node, taken_node);
                     if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size()) push_to_history_table(problem_state.history_key,lower_bound,&his_node,false);
                     else limit_insertion = true;
+                    //TODO: add depth parameter (maybe, I never found any way to actually get good results out of it)
                 }
                 else if (taken && !decision) { //if this path is dominated by another path
                     prune(source_node, taken_node);
@@ -758,9 +759,14 @@ void solver::enumerate(){
         //     last_node = -1;
         // }
         
-        if (limit_insertion && history_table.get_current_size() < history_table.get_max_size() && problem_state.current_path.size() >= inhis_depth) { //don't add if it was already added
+        if (limit_insertion && history_table.get_current_size() < history_table.get_max_size()) {
             push_to_history_table(problem_state.history_key,lb_liminsert,NULL,false);
         }
+
+        //TODO: replace above with this, for taking depth into account
+        // if (limit_insertion && history_table.get_current_size() < history_table.get_max_size() && problem_state.current_path.size() >= inhis_depth) { //don't add if it was already added
+        //     push_to_history_table(problem_state.history_key,lb_liminsert,NULL,false);
+        // }
 
         // cur_active_tree.pop_back(stop_init,Allocator);
 
@@ -801,6 +807,9 @@ void solver::retrieve_input() {
             getline(inFile,line);
             instance_size = stoi(line);
         }
+        else if (line == "EOF") {
+            break;
+        }
         else if (edge_weight_section) { //read cost/precedence matrix
             stringstream sstream;
             sstream << line;
@@ -816,7 +825,14 @@ void solver::retrieve_input() {
     }
 
     if (instance_size != int(file_matrix.size())) {
-        cerr << "Error: Instance Size Ambiguous. Expected " << instance_size << ". Was " << file_matrix.size() << endl;
+        std::cerr << "Error: Instance Size Ambiguous. Expected " << instance_size << ". Was " << file_matrix.size() << std::endl;
+        for (int i = 0; i < (int) file_matrix.size(); i++) {
+            for (int j = 0; i < (int) file_matrix[i].size(); i++) {
+                std::cerr << file_matrix[i][j] << " ";
+            }
+            std::cerr << std::endl;
+        }
+
         exit(EXIT_FAILURE);
     }
 
