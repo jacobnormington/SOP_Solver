@@ -118,7 +118,9 @@
 
 ///////////Diagnostic Variables//////////
     static vector<unsigned long long> enumerated_nodes;             //total number of nodes processed by each thread
+
     //static vector<unsigned long long> estimated_trimmed_percent;  //estimated percentage of entire tree pruned or fully enumerated in each thread, stored as an integer out of ULLONG_MAX
+    //TODO: change estimated_trimmed_percent to use unsigned_long_64 (and ULONG_MAX) instead of unsigned long long (and ULLONG_MAX)
     //static vector<int_64> num_resume;
     //static vector<int_64> num_stop;
     //static vector<double> lp_time;
@@ -244,7 +246,7 @@ void solver::solve(string f_name, int thread_num) {
     // initial_hungarian_state = vector<Hungarian>(thread_total);
     // for (int i = 0; i < thread_total; i++) initial_hungarian_state.push_back(default_state.hungarian_solver);
     // steal_cnt = vector<int>(thread_total,0);
-    // enumerated_nodes = vector<unsigned_long_64>(thread_total);
+    enumerated_nodes = vector<unsigned_long_64>(thread_total);
     // estimated_trimmed_percent = vector<unsigned long long>(thread_total,0);
 
     //if (enable_lkh) LKH_thread = thread(run_lkh);
@@ -268,16 +270,18 @@ void solver::solve(string f_name, int thread_num) {
     
     ///// BEGIN DIAGNOSTICS /////
 
-    // int total_cost = 0;
-    // std::cout << "Final solution: " << best_solution[0] << " ";
-    // for (int i = 1; i < (int) best_solution.size(); i++) {
-    //     std::cout << best_solution[i] << " ";
-    //     int src = best_solution[i-1];
-    //     int dst = best_solution[i];
-    //     total_cost += cost_graph[src][dst].weight;
-    // }
-    // std::cout << std::endl;
-    // std::cout << "Cost of final solution is: " << total_cost << ", Reported: " << best_cost << std::endl << std::endl;
+    int total_cost = 0;
+    std::cout << "Final solution: " << best_solution[0] << " ";
+    for (int i = 1; i < (int) best_solution.size(); i++) {
+        std::cout << best_solution[i] << " ";
+        int src = best_solution[i-1];
+        int dst = best_solution[i];
+        total_cost += cost_graph[src][dst].weight;
+    }
+    std::cout << std::endl;
+    std::cout << "Cost of final solution is: " << total_cost << ", Reported: " << best_cost << std::endl << std::endl;
+
+
 
     // for (int i = 0; i < thread_total; i++) {
     //     cout << "--------------------------------------------------------" << endl;
@@ -289,6 +293,34 @@ void solver::solve(string f_name, int thread_num) {
     //     //cout << "                    Load Process Time 2 = " << proc_time[i][2] / (float)(1000000) << " s" << endl;
     //     //cout << "--------------------------------------------------------" << endl;
     // }
+
+    //unsigned long total_enodes = 0;
+    //for (int i = 0; i < thread_total; i++) total_enodes += enumerated_nodes[i].val;
+    //for (int i = 0; i < thread_total; i++) {
+   //     std::cout << "thread " << i << " enumerated nodes = " << enumerated_nodes[i].val << ", " << double(enumerated_nodes[i].val)/double(total_enodes) << "%" << std::endl;
+   // }
+   // std::cout << "Total enumerated nodes are " << total_enodes << std::endl << std::endl;
+
+
+
+   // history_table.print_curmem();
+   // std::cout << std::endl;
+
+
+
+    //print out progress estimates
+    // if (enable_progress_estimation)
+    // {
+    //     unsigned long long total_progress = 0;
+    //     for (int i = 0; i < thread_total; i++)
+    //     {
+    //         total_progress += estimated_trimmed_percent[i];
+    //         //std::cout << "thread " << i << " trimmed = " << ((double) estimated_trimmed_percent[i])/ULLONG_MAX*100 << "% of the tree" << std::endl;
+    //     }
+    //     std::cout << "Total Progress = " << round(((double) total_progress)/ULLONG_MAX*100) << "%" << std::endl;
+    //     std::cout << total_progress << " / " << ULLONG_MAX << std::endl << std::endl;
+    // }
+
         
     return;
 }
@@ -537,6 +569,8 @@ void solver::enumerate(){
                     prune(source_node, taken_node);
                     continue;
                 }
+
+                enumerated_nodes[thread_id].val++;
 
                 bool decision = history_utilization(problem_state.history_key,problem_state.current_cost,&lower_bound,&taken,&his_node);
                 if (!taken) { //if there is no similar entry in the history table
@@ -1153,6 +1187,7 @@ sop_state solver::generate_solver_state(path_node& subproblem) {
 //             initial_LKHRun = false;
 //         }
 //         BB_SolFound = false;
+//         //TODO: add entries to the history table corresponding to the LKH solution
 //     }
 //     return;
 // }
