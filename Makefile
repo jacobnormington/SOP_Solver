@@ -14,7 +14,7 @@ OBJDIR = obj
 LKH_OBJS = $(patsubst %,$(OBJDIR)/%,$(_LKH_OBJS))
 PBB_OBJS = $(patsubst %,$(OBJDIR)/%,$(_PBB_OBJS))
 
-_PBB_OBJS = main.o solver.o history_table.o hungarian.o local_pool.o
+_PBB_OBJS = main.o solver.o history_table.o hungarian.o local_pool.o timer.o
 _LKH_OBJS = Activate.o AddCandidate.o AddExtraCandidates.o                  \
 		AddTourCandidates.o AdjustCandidateSet.o AdjustClusters.o       \
 		AllocateStructures.o Ascent.o                                   \

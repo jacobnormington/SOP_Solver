@@ -42,7 +42,7 @@
             // int parent_lv = -1;
             // bool* invalid_ptr = NULL; //investigate
             // bool deprecated = false; //For Thread Stopping. if this node exists in a redundant subspace and so does not need to be processed
-            // unsigned long long current_node_value = -1; //the portion out of ULLONG_MAX of the working tree that is under this node
+            unsigned long long current_node_value = -1; //the portion out of ULLONG_MAX of the working tree that is under this node
 
             //Active_Path partial_active_path;
             //HistoryNode* root_his_node;
