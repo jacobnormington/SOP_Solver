@@ -39,7 +39,7 @@
             /* Returns a thread number of the best victim, other than you, for workstealing. 
                 thread_number - this thread's number, to ensure you aren't recommended to steal from yourself
                 Return - the thread number of the thread to steal from */
-            int choose_victim(int thread_number);
+            int choose_victim(int thread_number,std::vector<std::atomic<unsigned long long>>& work_remaining);
 
             int active_pool_size(int thread_number); //diagnostic
     };

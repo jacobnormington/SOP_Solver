@@ -17,8 +17,8 @@
     // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
     // group_sample_time                            //period on which to schedule thread restart
     // static int tgroup_ratio = 0;                 //
-    // static bool enable_workstealing = false;
-    // static bool enable_threadstop = false;
+    static bool enable_workstealing = false;
+    static bool enable_threadstop = false;
     // static bool enable_lkh = false;
     // static bool enable_progress_estimation = false;
 
@@ -41,12 +41,16 @@
     static History_Table history_table(TABLE_SIZE);     //the history table
     static vector<path_node> global_pool;               //a global pool of nodes that haven't yet been processed by any thread, only ever take from the back
     static local_pool* local_pools;                     //each thread's local pool, with the internal tools to manage them, only ever take from the back
+    static vector<atomic<unsigned long long>> work_remaining; //used for work stealing, hold an estimate of how much work is left for a thread to do
     
 
     static vector<int> best_solution;               //the lowest cost solution found so far in any thread
     int best_cost = INT_MAX;                        //the cost of best_solution, this is an extern (global) variable shared by LKH
 
-    std::chrono::time_point<std::chrono::system_clock> solver_start_time;  //when solve_parallel started (before processing begins, but after all the basic setup, file parsing, etc.)
+    static timer main_timer;  //when solve_parallel started (before processing begins, but after all the basic setup, file parsing, etc.)
+    
+    
+
     // std::chrono::time_point<std::chrono::system_clock> time_point;
 /////////////////////////////////////////
 
@@ -113,7 +117,7 @@
 
 
 ///////////Diagnostic Variables//////////
-    //static vector<unsigned_long_64> enumerated_nodes;             //total number of nodes processed by each thread
+    static vector<unsigned long long> enumerated_nodes;             //total number of nodes processed by each thread
     //static vector<unsigned long long> estimated_trimmed_percent;  //estimated percentage of entire tree pruned or fully enumerated in each thread, stored as an integer out of ULLONG_MAX
     //static vector<int_64> num_resume;
     //static vector<int_64> num_stop;
@@ -134,15 +138,12 @@ bool global_pool_sort(const path_node& src, const path_node& dest) { return src.
 //sort by decreasing lower bound (back is the best)
 bool local_pool_sort(const path_node& src, const path_node& dest)  { return src.lower_bound > dest.lower_bound; }
 
-
 void solver::assign_parameter(vector<string> setting) {
     t_limit = atoi(setting[0].c_str());
     std::cout << "Time limit = " << t_limit << std::endl;
 
     global_pool_size = atoi(setting[1].c_str());
     std::cout << "GPQ size = " << global_pool_size << std::endl;
-    // local_depth = atoi(setting[2].c_str());
-    // std::cout << "LPQ depth = " << local_depth << std::endl; //TODO: this probably doesn't mean anything anymore??? presumably to be removed 
 
     inhis_mem_limit = atof(setting[3].c_str());
     std::cout << "History table mem limit = " << inhis_mem_limit << std::endl;
@@ -247,17 +248,23 @@ void solver::solve(string f_name, int thread_num) {
     // estimated_trimmed_percent = vector<unsigned long long>(thread_total,0);
 
     //if (enable_lkh) LKH_thread = thread(run_lkh);
-
+    
     auto start_time = chrono::high_resolution_clock::now();
     solve_parallel();
     auto end_time = chrono::high_resolution_clock::now();
 
     //if (enable_lkh) if (LKH_thread.joinable()) LKH_thread.join();
 
+
+    //DIAGNOSTIC : Enumerated Nodes
+    // unsigned long long enumerated_nodes_sum = 0;
+    // for(int i = 0; i < enumerated_nodes.size(); i++){
+    //     enumerated_nodes_sum += enumerated_nodes[i];
+    // }
+
     auto total_time = chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     std::cout << "------------------------" << thread_total << " thread" << "------------------------------" << std::endl;
     std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl << std::endl;
-    
     
     ///// BEGIN DIAGNOSTICS /////
 
@@ -282,44 +289,16 @@ void solver::solve(string f_name, int thread_num) {
     //     //cout << "                    Load Process Time 2 = " << proc_time[i][2] / (float)(1000000) << " s" << endl;
     //     //cout << "--------------------------------------------------------" << endl;
     // }
-
-
-
-    // unsigned long total_enodes = 0;
-    // for (int i = 0; i < thread_total; i++) total_enodes += enumerated_nodes[i].val;
-    // for (int i = 0; i < thread_total; i++) {
-    //     cout << "thread " << i << " enumerated nodes = " << enumerated_nodes[i].val << ", " << double(enumerated_nodes[i].val)/double(total_enodes) << "%" << endl;
-    // }
-    //history_table.print_curmem();
-    //cout << "Total enumerated nodes are " << total_enodes << endl;
-
-
-
-    //print out progress estimates
-    // if (enable_progress_estimation)
-    // {
-    //     unsigned long long total_progress = 0;
-    //     for (int i = 0; i < thread_total; i++)
-    //     {
-    //         total_progress += estimated_trimmed_percent[i];
-    //         //cout << "thread " << i << " trimmed = " << ((double) estimated_trimmed_percent[i])/ULLONG_MAX*100 << "% of the tree" << endl;
-    //     }
-    //     cout << "Total Progress = " << round(((double) total_progress)/ULLONG_MAX*100) << "%" << endl;
-    //     cout << total_progress << " / " << ULLONG_MAX << endl;
-    // }
         
     return;
 }
 
 void solver::solve_parallel() {
-    solver_start_time = std::chrono::system_clock::now();
-
+    main_timer.restart();
+    
     vector<solver> solvers(thread_total);
     deque<sop_state>* solver_container;
     vector<thread> Thread_manager(thread_total);
-    //vector<int> ready_thread; //DEPRICATED
-
-
 
     /* Begin splitting nodes of the enumeration tree until GPQ has reached a minimum size. */
     vector<node> ready_list;
@@ -335,30 +314,10 @@ void solver::solve_parallel() {
             ready_list.push_back(node(i));
         }
     }
-    // problem_state.current_node_value = ULLONG_MAX; //for progress estimation
-    // unsigned long long child_node_value = -1; //each child's share of the tree
-    // int remainder = -1; //remainder to be split among the first children
-
-
 
     //Process first generation of nodes (the ready list as defined above)
     sop_state initial_state = problem_state;
-    // if (enable_progress_estimation)
-    // {
-    //     child_node_value = ULLONG_MAX / ready_list.size();
-    //     remainder = ULLONG_MAX % ready_list.size();
-    //     //cout << "Ready list: " << ready_list.size() << ", " << "child_node_value: " << child_node_value << ", " << "remainder: " << remainder << endl;
-    // }
-
-    //int child_num = 0; //the arbitrary birth-order of children in the ready_list, used for progress estimation
     for (auto node : ready_list) {
-        // if (enable_progress_estimation)
-        // {
-        //     if (child_num == 0)
-        //         initial_state.current_node_value = child_node_value + 1;
-        //     if (child_num == remainder)
-        //         initial_state.current_node_value = child_node_value;
-        // }
 
         int taken_node = node.n;
         int cur_node = initial_state.current_path.back();
@@ -377,8 +336,6 @@ void solver::solve_parallel() {
         if (pre_density != 0) solver_container->push_back(initial_state); //a copy, since sop_state is a struct, passed by value
         else if (instance_size > thread_total) {
             global_pool.push_back(path_node(initial_state.current_path, initial_state.lower_bound, initial_state.origin_node));
-            // GPQ.Unknown.push_back(path_node(initial_state.current_path,initial_state.originate,initial_state.load_info,-1, initial_state.current_node_value,
-            //                                    Active_Path(initial_state.cur_solution.size()),NULL));
         }
 
         initial_state.taken_arr[taken_node] = false;
@@ -387,14 +344,7 @@ void solver::solve_parallel() {
         initial_state.current_path.pop_back();
         initial_state.hungarian_solver.undue_row(cur_node, taken_node);
         initial_state.hungarian_solver.undue_column(taken_node, cur_node);
-
-        // if (enable_progress_estimation)
-        //     child_num++;
     }
-
-
-
-    //for (int i = thread_total - 1; i >= 0; i--) ready_thread.push_back(i); //INVESTIGATE; seems to be unused
 
     //Repeat split operation until enough nodes are produced, but every node must be of the same depth
     while (global_pool.empty() && (solver_container->size() < (size_t)global_pool_size || split_level_check(solver_container))) {
@@ -416,26 +366,9 @@ void solver::solve_parallel() {
             std::cout << "Ready List is Empty." << std::endl;
             exit(EXIT_SUCCESS);
         }
-
-        // if (enable_progress_estimation)
-        // {
-        //     child_node_value = target.current_node_value / ready_list.size();
-        //     remainder = target.current_node_value % ready_list.size();
-        //     child_num = 0; //reset counter
-        //     //cout << "Ready list: " << ready_list.size() << ", " << "child_node_value: " << child_node_value << ", " << "remainder: " << remainder << endl;
-        // }
             
         for (auto node : ready_list) {
-            // if (enable_progress_estimation)
-            // {
-            //     if (child_num == 0)
-            //         target.current_node_value = child_node_value + 1;
-            //     if (child_num == remainder)
-            //         target.current_node_value = child_node_value;
-            // }
-            // cout << target.current_node_value << " / " << child_node_value << endl;
-            
-            //Push split node back into GPQ
+            //Push split node back into Global Pool
             int taken_node = node.n;
             int cur_node = target.current_path.back();
             target.current_path.push_back(taken_node);
@@ -456,19 +389,11 @@ void solver::solve_parallel() {
                 target.hungarian_solver.undue_row(cur_node, taken_node);
                 target.hungarian_solver.undue_column(taken_node, cur_node);
             }
-            // else //prune node due to backtracking
-            // {
-            //     if (enable_progress_estimation)
-            //         estimated_trimmed_percent[0] += target.current_node_value;
-            // }
 
             target.current_cost -= cost_graph[cur_node][taken_node].weight;
             for (int vertex : dependency_graph[taken_node]) target.depCnt[vertex]++;
             target.taken_arr[taken_node] = false;
             target.current_path.pop_back();
-
-            // if (enable_progress_estimation)
-            //     child_num++;
         }
 
     }
@@ -481,17 +406,6 @@ void solver::solve_parallel() {
     sort(global_pool.begin(),global_pool.end(),global_pool_sort);
     delete solver_container;
     /* End Splitting Operation */
-
-    // std::cout << "GPQ initial depth is " << global_pool.back().sequence.size() << std::endl;
-    // std::cout << "Initial GPQ size is " << global_pool.size() << std::endl;
-    // std::cout << "Global Pool: " << std::endl;
-    // for (long unsigned int i = 0; i < global_pool.size(); i++)
-    // {
-    //     std::cout << global_pool[i].lower_bound << " ";
-    // }
-    // std::cout << std::endl;
-
-
 
     /* Assign subproblems from the GPQ into solvers for each thread. */
     int thread_cnt = 0;
@@ -554,7 +468,13 @@ void solver::solve_parallel() {
         }
     }
 
-    // time_point = chrono::high_resolution_clock::now();
+    work_remaining = std::vector<std::atomic<unsigned long long>>(thread_cnt); // PROGRESS initializing work remaining vector
+    enumerated_nodes = std::vector<unsigned long long>(thread_cnt);
+    for(int i = 0; i < thread_cnt; i++){
+        work_remaining[i] = ULLONG_MAX;
+        enumerated_nodes[i] = 0;
+    }
+
     for (int i = 0; i < thread_total; i++) {
         Thread_manager[i] = thread(&solver::enumerate,move(solvers[i]));
         active_threads++;
@@ -562,39 +482,26 @@ void solver::solve_parallel() {
     for (int i = 0; i < thread_total; i++) { //waits until every thread is finished
         if (Thread_manager[i].joinable()) {
             Thread_manager[i].join();
-            // delete solvers[i].local_pool;
-            // ready_thread.push_back(i);
         }
     }
-    //active_threads = 0;
 
-    //BB_Complete = true;
     if (time_out) cout << "instance timed out " << endl;
-
-    // if (time_out || (GPQ.Unknown.empty() && GPQ.Abandoned.empty())) {
-    //     delete thread_load;
-    //     return;
-    // }
 
     return;
 }
 
 void solver::enumerate(){
+
     while(!time_out){
-        //DIAGNOSTIC:
-        // int actual_cost = 0;
-        // for(int i = 0 ; i < (int) problem_state.current_path.size() - 1; i++)
-        //     actual_cost += cost_graph[problem_state.current_path[i]][problem_state.current_path[i + 1]].weight;
-            
-        // if(actual_cost != problem_state.current_cost){
-        //     cout << "at depth " << problem_state.current_path.size();
-        //     cout << "   actual cost: " << actual_cost << "   current cost: " << problem_state.current_cost <<endl;
-        // }
+        //PROGRESS variables
+        int ready_node_count = 0;
+        int pruned_count = 0;     
 
         deque<path_node> ready_list;
         bool limit_insertion = false;
         for(int taken_node = 0; taken_node < instance_size; taken_node++){
             if(!problem_state.depCnt[taken_node] && !problem_state.taken_arr[taken_node]){ //only consider nodes that haven't already been taken, and who have no remaining dependencies
+                ready_node_count++;
                 //triming
                 int source_node = problem_state.current_path.back();
                 problem_state.current_path.push_back(taken_node);
@@ -607,6 +514,7 @@ void solver::enumerate(){
                 //Active_Node* active_node = NULL;
 
                 if(problem_state.current_cost >= best_cost){ //backtracking
+                    pruned_count++;
                     prune(source_node, taken_node);
                     continue;
                 }
@@ -618,25 +526,26 @@ void solver::enumerate(){
                             best_cost = problem_state.current_cost;
                             best_solution = problem_state.current_path;
 
-                            std::cout << "Best Cost = " << best_cost << " Found in Thread " << thread_id;
-                            std::cout << " at time = " << std::chrono::duration<double>(std::chrono::system_clock::now() - solver_start_time).count() << " [" << /*thread_load[thread_id].data_cnt <<*/ " ]" << std::endl; //TODO: what is thread_load for
+                            //DIAGNOSTIC: best cost
+                            //std::cout << "Best Cost = " << best_cost << " Found in Thread " << thread_id; //TODO: add toggle
+                            //std::cout << " at time = " << main_timer.get_time_seconds() << std::endl; 
                         }
                         best_solution_lock.unlock();
                     }
 
+                    pruned_count++;
                     prune(source_node, taken_node);
                     continue;
                 }
 
                 bool decision = history_utilization(problem_state.history_key,problem_state.current_cost,&lower_bound,&taken,&his_node);
-                //enumerated_nodes[thread_id].val++;
                 if (!taken) { //if there is no similar entry in the history table
                     lower_bound = dynamic_hungarian(source_node, taken_node);
                     if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size()) push_to_history_table(problem_state.history_key,lower_bound,&his_node,false);
                     else limit_insertion = true;
-                    //TODO: add depth parameter (maybe, I never found any way to actually get good results out of it)
                 }
                 else if (taken && !decision) { //if this path is dominated by another path
+                    pruned_count++;
                     prune(source_node, taken_node);
                     continue;
                 }
@@ -646,12 +555,11 @@ void solver::enumerate(){
                         HistoryContent content = his_node->entry.load();
                         if (content.prefix_cost >= problem_state.current_cost) his_node->explored = true;
                     }
-
+                    pruned_count++;
                     prune(source_node, taken_node);
                     continue;
                 }
                 
-
                 //"good" node, add it to the ready_list, then reset problem state
                 path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node);
                 ready_list.push_back(temp);
@@ -661,40 +569,32 @@ void solver::enumerate(){
                 problem_state.history_key.second = source_node;
             }
         }
+         
+        //PROGRESS 
+        unsigned long long next_work_above = problem_state.work_above / ready_node_count;
+        unsigned long long remainder = problem_state.work_above % ready_node_count;
+        work_remaining[thread_id] = work_remaining[thread_id] - next_work_above * pruned_count;
+        for(unsigned i = 0; i < ready_list.size(); i++){
+            if(i < remainder){
+                ready_list[i].current_node_value = next_work_above + 1;
+            } else{
+                ready_list[i].current_node_value = next_work_above;
+            }
+        }         
+        
+        //DIAGNOSTIC: enum_nodes
+        //enumerated_nodes[thread_id] += ready_node_count;
        
         //Sort the ready list and push into local pool
         if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
         local_pools->push_list(thread_id, ready_list);
 
-        //HistoryNode* history_entry = NULL;
-
         int lb_liminsert = problem_state.lower_bound; //save lower bound through enumeration for limit insertion in the history table
-
-        //cur_active_tree.push_back(enumeration_list.size(),current_hisnode,Allocator);
-        
-        //CheckStop_Request();
-        
 
         /* Begin enumeration. */
         path_node active_node;
         while (local_pools->pop_from_active_list(thread_id, active_node)){
             if(enumeration_pre_check(active_node)) continue; //enumeration-time backtracking, and other preprocessing
-
-            // if (abandon_share || abandon_work) { //should both be in enumeration_pre_check
-            //     curlocal_nodes.clear();
-            //     break;
-            // }
-
-            // if (!stop_init) {
-            //     Check_Local_Pool(enumeration_list,curlocal_nodes);
-            // }
-
-            // if (speed_search) {
-            //     for (unsigned i = 0; i < shared_lbstate[mg_id].size(); i++) {
-            //         shared_lbstate[mg_id][i].fix_row(u,v);
-            //         shared_lbstate[mg_id][i].fix_column(v,u);
-            //     }
-            // }
 
             /* Take */
             int src = problem_state.current_path.back();        //the number of the predecessor to the node being considered
@@ -705,14 +605,13 @@ void solver::enumerate(){
             for (int vertex : dependency_graph[taken_node]) problem_state.depCnt[vertex]--;
             problem_state.history_key.first[taken_node] = true;
             problem_state.history_key.second = taken_node;
-            //problem_state.current_node_value = enumeration_list.back().current_node_value; //for progress estimation
             problem_state.hungarian_solver.fix_row(src, taken_node);
             problem_state.hungarian_solver.fix_column(taken_node, src);
             // HistoryNode *previous_hisnode = current_hisnode;
             // current_hisnode = history_entry;
             // problem_state.suffix_cost = 0;
             problem_state.enumeration_depth++;
-
+            problem_state.work_above = active_node.current_node_value;
 
             enumerate();
 
@@ -731,17 +630,8 @@ void solver::enumerate(){
             problem_state.taken_arr[taken_node] = false;
             problem_state.current_path.pop_back();
 
-            // if (speed_search) {
-            //     for (unsigned i = 0; i < shared_lbstate[mg_id].size(); i++) {
-            //         shared_lbstate[mg_id][i].undue_row(u,v);
-            //         shared_lbstate[mg_id][i].undue_row(v,u);
-            //     }
-            // }
-
-
             if (thread_id == 0){ //check if out of time
-                auto cur_time = std::chrono::system_clock::now();
-                if (std::chrono::duration<double>(cur_time - solver_start_time).count() > t_limit){
+                if (main_timer.get_time_seconds() > t_limit){
                     time_out = true;
                     active_threads = 0;
                     local_pools->pop_active_list(thread_id);
@@ -1078,19 +968,23 @@ bool solver::enumeration_pre_check(path_node& active_node){
     {   
         // if (enable_progress_estimation) //pruning due to enumeration-time backtracking
         //     estimated_trimmed_percent[thread_id] += active_node.current_node_value; //add the value of this node you are trimming
+        //PROGRESS
+        work_remaining[thread_id] = work_remaining[thread_id] - active_node.current_node_value;
 
         // cur_active_tree.incre_children_cnt(Allocator);
         // if (active_node.his_entry != NULL && active_node.his_entry->active_threadID == thread_id) {
         //     active_node.his_entry->explored = true;
         // }
-
+        //DIAGNOSTIC: view path
+        //cout << "at pre check Pruned node " << active_node.sequence.back() << endl;
         return true;
     }
     return false;
 }
 
 void solver::prune(int source_node, int taken_node){
-    //TODO: progress estimation
+    //DIAGNOSTIC: view path
+    //cout << "Pruning node " << taken_node << endl;
     // if (enable_progress_estimation)
     //     estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming 
 
@@ -1123,23 +1017,23 @@ bool solver::history_utilization(Key& key,int cost, int* lowerbound, bool* found
 
     if (cost >= content.prefix_cost) return false;
 
-    //int target_ID = history_node->active_threadID; //find whoever was working in this subspace
+    int target_ID = history_node->active_threadID; //find whoever was working in this subspace
     int imp = content.prefix_cost - cost;
     
     if (!history_node->explored) { //TODO: thread stopping
-        // if (enable_threadstop && active_threads > 0) { //then issue thread stop request, since this path is superior
-        //     buffer_lock.lock();
-        //     if (request_buffer.empty() || request_buffer.front().target_thread != target_ID || request_buffer.front().target_depth > (int)problem_state.current_path.size()) {
-        //         //num_stop[thread_id].val++;
-        //         request_buffer.push_front({problem_state.current_path.back(),(int)problem_state.current_path.size(),
-        //                                    content.prefix_cost,target_ID,key.first});
-        //         if (!stop_sig) {
-        //             stop_cnt = 0;
-        //             stop_sig = true;
-        //         }
-        //     }
-        //     buffer_lock.unlock();
-        // }
+        if (enable_threadstop && active_threads > 0) { //then issue thread stop request, since this path is superior
+            buffer_lock.lock();
+            if (request_buffer.empty() || request_buffer.front().target_thread != target_ID || request_buffer.front().target_depth > (int)problem_state.current_path.size()) {
+                //num_stop[thread_id].val++;
+                request_buffer.push_front({problem_state.current_path.back(),(int)problem_state.current_path.size(),
+                                        content.prefix_cost,target_ID,key.first});
+                if (!stop_sig) {
+                    stop_cnt = 0;
+                    stop_sig = true;
+                }
+            }
+            buffer_lock.unlock();
+        }
     }
 
     if (imp <= content.lower_bound - best_cost) {
@@ -1161,21 +1055,11 @@ void solver::push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,
 }
 
 
-
-
-
-
-
-
-
-
 /* BEGIN WORK STEALING*/
-
+//WORKSTEALING
 bool solver::workload_request(){
-    // TODO: take from global pool
-    path_node new_node;
-
     if(!global_pool.empty()){
+
         global_pool_lock.lock();
         if(!global_pool.empty()){
             problem_state = generate_solver_state(global_pool.back());
@@ -1185,26 +1069,32 @@ bool solver::workload_request(){
         }
         global_pool_lock.unlock();
     }
-
-    // if (enable_workstealing) {
-    //     active_threads--;
-    //     while(true){
-    //         int target = local_pools->choose_victim(thread_id);
-    //         if(local_pools->pop_from_zero_list(target, new_node)){
-    //             problem_state = generate_solver_state(new_node);
-    //             return true;
-    //         }
-    //         if(active_threads == 0)
-    //             return false;
-    //     }
-    //     active_threads++;
-    // }
+    //cout << "attempting to steal work " << ((int) active_threads) <<endl;
+   // if (enable_workstealing) {
+    path_node new_node;
+    active_threads--;
+    while(true){
+        if(active_threads == 0)  
+            return false;
+        int target = local_pools->choose_victim(thread_id, work_remaining);
+        if(target == -1) continue;
+        if(local_pools->pop_from_zero_list(target, new_node)){
+            work_remaining[target] = work_remaining[target] - new_node.current_node_value;
+            problem_state = generate_solver_state(new_node);
+            problem_state.work_above = new_node.current_node_value;
+            active_threads++; 
+            return true;
+        }
+    }
+        
+   // }
     return false;
 }
 
 sop_state solver::generate_solver_state(path_node& subproblem) {
     sop_state state = default_state;
 
+    work_remaining[thread_id] = subproblem.current_node_value;
     int cur_node = subproblem.sequence.front();
     int taken_node = -1;
     int size = subproblem.sequence.size();
@@ -1249,8 +1139,6 @@ sop_state solver::generate_solver_state(path_node& subproblem) {
 
     return state;
 }
-/* END WORK STEALING */
-
 
 /* BEGIN THREAD STOPPING */
 
@@ -1270,6 +1158,8 @@ sop_state solver::generate_solver_state(path_node& subproblem) {
 // }
 /* END LKH */
 
+
+//DIAGNOSTIC
 /* BEGIN DIAGNOSTIC FUNCTIONS */
 
 void solver::print_state(sop_state& state) {

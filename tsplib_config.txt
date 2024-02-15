@@ -1,5 +1,5 @@
 //Time limit for the input instance (in seconds)
-Time_Limit = 3600
+Time_Limit = 500
 
 //Size of the initial global workload pool
 Global_Pool_Size = 32
