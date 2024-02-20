@@ -246,7 +246,7 @@ void solver::solve(string f_name, int thread_num) {
     // initial_hungarian_state = vector<Hungarian>(thread_total);
     // for (int i = 0; i < thread_total; i++) initial_hungarian_state.push_back(default_state.hungarian_solver);
     // steal_cnt = vector<int>(thread_total,0);
-    enumerated_nodes = vector<unsigned_long_64>(thread_total);
+    //enumerated_nodes = vector<unsigned_long_64>(thread_total);
     // estimated_trimmed_percent = vector<unsigned long long>(thread_total,0);
 
     //if (enable_lkh) LKH_thread = thread(run_lkh);
@@ -271,15 +271,15 @@ void solver::solve(string f_name, int thread_num) {
     ///// BEGIN DIAGNOSTICS /////
 
     int total_cost = 0;
-    std::cout << "Final solution: " << best_solution[0] << " ";
-    for (int i = 1; i < (int) best_solution.size(); i++) {
-        std::cout << best_solution[i] << " ";
-        int src = best_solution[i-1];
-        int dst = best_solution[i];
-        total_cost += cost_graph[src][dst].weight;
-    }
-    std::cout << std::endl;
-    std::cout << "Cost of final solution is: " << total_cost << ", Reported: " << best_cost << std::endl << std::endl;
+    // std::cout << "Final solution: " << best_solution[0] << " ";
+    // for (int i = 1; i < (int) best_solution.size(); i++) {
+    //     std::cout << best_solution[i] << " ";
+    //     int src = best_solution[i-1];
+    //     int dst = best_solution[i];
+    //     total_cost += cost_graph[src][dst].weight;
+    // }
+    //std::cout << std::endl;
+    //std::cout << "Cost of final solution is: " << total_cost << ", Reported: " << best_cost << std::endl << std::endl;
 
 
 
@@ -570,7 +570,6 @@ void solver::enumerate(){
                     continue;
                 }
 
-                enumerated_nodes[thread_id].val++;
 
                 bool decision = history_utilization(problem_state.history_key,problem_state.current_cost,&lower_bound,&taken,&his_node);
                 if (!taken) { //if there is no similar entry in the history table
