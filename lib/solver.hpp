@@ -26,9 +26,7 @@
     #include <boost/container/vector.hpp>
     #include <boost/dynamic_bitset.hpp>
 
-    // extern "C" {
-    //     #include "LKH/LKHmain.h"
-    // }
+    
 
     #include "timer.hpp"
     #include "history_table.hpp"
@@ -175,7 +173,7 @@
 
             /* For diagnostics, print out an entire problem state. */
             void print_state(sop_state &state);
-
+            
         public:
             /* Takes config information and defines all runtime parameters from those strings. */
             void assign_parameter(vector<string> setting);
