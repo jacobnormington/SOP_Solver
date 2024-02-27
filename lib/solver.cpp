@@ -1,5 +1,9 @@
 #include "solver.hpp"
 
+extern "C" {
+        #include "LKH/LKHmain.h"
+    }
+
 #define TABLE_SIZE 541065431                        //number of buckets in the history table
 
 
@@ -17,9 +21,9 @@
     // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
     // group_sample_time                            //period on which to schedule thread restart
     // static int tgroup_ratio = 0;                 //
-    static bool enable_workstealing = false;
+    //static bool enable_workstealing = false;
     static bool enable_threadstop = false;
-    // static bool enable_lkh = false;
+    static bool enable_lkh = true;
     // static bool enable_progress_estimation = false;
 
     //derived attributes
@@ -34,7 +38,7 @@
     static vector<vector<int>> dependency_graph;    //list for each node i of every node j that is dependent on it
     static vector<vector<edge>> in_degree;          //list for each node i of every node j that it is dependent on (in edge format) i.e. what nodes must precede it
     static vector<vector<edge>> hungarian_graph;    //graph in the format that the Hungarian algorithm requires
-    static vector<vector<int>> outgoing_graph;
+    static vector<vector<int>> outgoing_graph; 
 
     static sop_state default_state;                     //state of a solver before the first node was taken
     //static vector<Hungarian> initial_hungarian_state;   //for each thread, the Hungarian solver as it began
@@ -107,12 +111,13 @@
 
 
 ///////////LKH Variables/////////////////
-    // thread LKH_thread;
-    // int* bestBB_tour = NULL;                        //an array of the best solution not found by LKH, but 1-indexed
-    // bool BB_SolFound = false;                       //whether the current best solution was found by B&B, rather than LKH
-    // bool BB_Complete = false;
-    // bool local_searchinit = true;
-    // bool initial_LKHRun = true;
+    thread LKH_thread;
+    int* bestBB_tour = NULL;                        //an array of the best solution not found by LKH, but 1-indexed
+    bool BB_SolFound = false;                       //whether the current best solution was found by B&B, rather than LKH
+    bool BB_Complete = false;
+    bool local_searchinit = true;
+    bool initial_LKHRun = true;
+    pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;
 /////////////////////////////////////////
 
 
@@ -131,7 +136,7 @@
 /////////////////////////////////////////
 
 
-
+/* --------------------- Static Functions -------------------------*/
 //Compare two edges in the cost graph, a and b by their weight. a > b (therefore "better"), if a.weight < b.weight
 bool compare_edge(const edge a, const edge b) { return a.weight < b.weight; }
 //TODO: ensure that this actually means that you are picking the "best" nodes, and it isn't accidentally reverse-sorted
@@ -139,6 +144,20 @@ bool compare_edge(const edge a, const edge b) { return a.weight < b.weight; }
 bool global_pool_sort(const path_node& src, const path_node& dest) { return src.lower_bound > dest.lower_bound; }
 //sort by decreasing lower bound (back is the best)
 bool local_pool_sort(const path_node& src, const path_node& dest)  { return src.lower_bound > dest.lower_bound; }
+
+void lkh() {
+    while(!BB_Complete) {
+        LKH(&filename[0],initial_LKHRun);
+        if (initial_LKHRun) {
+            initial_LKHRun = false;
+        }
+        BB_SolFound = false;
+         //TODO: add entries to the history table corresponding to the LKH solution
+    }
+    return;
+}
+/* ---------------------       END        -------------------------*/
+/* --------------------- Static Functions -------------------------*/
 
 void solver::assign_parameter(vector<string> setting) {
     t_limit = atoi(setting[0].c_str());
@@ -180,11 +199,9 @@ void solver::solve(string f_name, int thread_num) {
         exit(EXIT_FAILURE);
     }
 
-    //if (enable_lkh) thread_total = thread_num - 1;
+    if (enable_lkh) thread_total = thread_num - 1;
     else thread_total = thread_num;
-    // if (thread_num < 2) enable_workstealing = false; //you can't steal work if there is only one BB thread
     filename = f_name;
-
     retrieve_input();
     transitive_redundancy();
 
@@ -249,13 +266,17 @@ void solver::solve(string f_name, int thread_num) {
     //enumerated_nodes = vector<unsigned_long_64>(thread_total);
     // estimated_trimmed_percent = vector<unsigned long long>(thread_total,0);
 
-    //if (enable_lkh) LKH_thread = thread(run_lkh);
+
+    bestBB_tour = new int[instance_size];
+    for (int i = 0; i < instance_size; i++) bestBB_tour[i] = best_solution[i] + 1;
+
+    if (enable_lkh) LKH_thread = thread(lkh);
     
     auto start_time = chrono::high_resolution_clock::now();
     solve_parallel();
     auto end_time = chrono::high_resolution_clock::now();
 
-    //if (enable_lkh) if (LKH_thread.joinable()) LKH_thread.join();
+    if (enable_lkh) if (LKH_thread.joinable()) LKH_thread.join();
 
 
     //DIAGNOSTIC : Enumerated Nodes
@@ -270,7 +291,7 @@ void solver::solve(string f_name, int thread_num) {
     
     ///// BEGIN DIAGNOSTICS /////
 
-    int total_cost = 0;
+    //int total_cost = 0;
     // std::cout << "Final solution: " << best_solution[0] << " ";
     // for (int i = 1; i < (int) best_solution.size(); i++) {
     //     std::cout << best_solution[i] << " ";
@@ -516,6 +537,8 @@ void solver::solve_parallel() {
             Thread_manager[i].join();
         }
     }
+    active_threads = 0;
+    BB_Complete = true;
 
     if (time_out) cout << "instance timed out " << endl;
 
@@ -555,12 +578,22 @@ void solver::enumerate(){
                     if(problem_state.current_cost < best_cost) {
                         best_solution_lock.lock();
                         if(problem_state.current_cost < best_cost) { //make sure it is still true
-                            best_cost = problem_state.current_cost;
-                            best_solution = problem_state.current_path;
+                            pthread_mutex_lock(&Sol_lock);
+                            if(problem_state.current_cost < best_cost) { // second check is for parallel reasons
+                                best_cost = problem_state.current_cost;
+                                best_solution = problem_state.current_path;
+                                //LKH
+                                if(enable_lkh){
+                                    for (int i = 0; i < (int)(best_solution.size()); i++)
+                                        bestBB_tour[i] = best_solution[i] + 1;
+                                    BB_SolFound = true;
+                                }
 
-                            //DIAGNOSTIC: best cost
-                            //std::cout << "Best Cost = " << best_cost << " Found in Thread " << thread_id; //TODO: add toggle
-                            //std::cout << " at time = " << main_timer.get_time_seconds() << std::endl; 
+                                //DIAGNOSTIC: best cost
+                                std::cout << "Best Cost = " << best_cost << " Found in Thread " << thread_id; //TODO: add toggle
+                                std::cout << " at time = " << main_timer.get_time_seconds() << std::endl; 
+                            }
+                            pthread_mutex_unlock(&Sol_lock);
                         }
                         best_solution_lock.unlock();
                     }
@@ -569,7 +602,7 @@ void solver::enumerate(){
                     prune(source_node, taken_node);
                     continue;
                 }
-
+ 
 
                 bool decision = history_utilization(problem_state.history_key,problem_state.current_cost,&lower_bound,&taken,&his_node);
                 if (!taken) { //if there is no similar entry in the history table
@@ -1176,21 +1209,6 @@ sop_state solver::generate_solver_state(path_node& subproblem) {
 /* BEGIN THREAD STOPPING */
 
 /* END THREAD STOPPING */
-
-
-/* BEGIN LKH */
-// void solver::run_lkh() {
-//     while(!BB_Complete) {
-//         LKH(&filename[0],initial_LKHRun);
-//         if (initial_LKHRun) {
-//             initial_LKHRun = false;
-//         }
-//         BB_SolFound = false;
-//         //TODO: add entries to the history table corresponding to the LKH solution
-//     }
-//     return;
-// }
-/* END LKH */
 
 
 //DIAGNOSTIC
