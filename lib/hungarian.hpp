@@ -7,17 +7,18 @@ using std::max;
 using std::min;
 using std::vector;
 
-//The dynamic hungarian library code is referenced from https://github.com/rod409/SOP.
-class Hungarian {
+// The dynamic hungarian library code is referenced from https://github.com/rod409/SOP.
+class Hungarian
+{
 
 public:
 	Hungarian();
 	Hungarian(int node_count, int max_weight, vector<vector<int>> cost_graph);
 	int start();
 	void fix_row(int i, int to);
-	void fix_column(int j, int from);	
+	void fix_column(int j, int from);
 	void undue_row(int i, int to);
-	void undue_column(int j, int from);	
+	void undue_column(int j, int from);
 	int get_matching_cost();
 	void solve_dynamic(void);
 
@@ -26,10 +27,12 @@ public:
 	vector<vector<int>> cost;
 	vector<vector<int>> original_cost;
 	int n, max_match;
-	vector<int> lx; vector<int> ly;
+	vector<int> lx;
+	vector<int> ly;
 	vector<int> xy;
 	vector<int> yx;
-	vector<bool> S; vector<bool> T;
+	vector<bool> S;
+	vector<bool> T;
 	vector<int> slack;
 	vector<int> slackx;
 	vector<int> prev;
