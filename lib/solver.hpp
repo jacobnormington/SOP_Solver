@@ -174,6 +174,9 @@ private:
     /* For diagnostics, print out an entire problem state. */
     void print_state(sop_state &state);
 
+    // For checking, if any thread requested another thread to stop
+    bool check_stop_request(int thread_id, const vector<int> &thread_sequence);
+
 public:
     /* Takes config information and defines all runtime parameters from those strings. */
     void assign_parameter(vector<string> setting);

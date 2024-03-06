@@ -174,8 +174,10 @@ void solver::assign_parameter(vector<string> setting)
     // if (!atoi(setting[8].c_str())) enable_workstealing = false;
     // else enable_workstealing = true;
 
-    // if (!atoi(setting[9].c_str())) enable_threadstop = false;
-    // else enable_threadstop = true;
+    if (!atoi(setting[9].c_str()))
+        enable_threadstop = false;
+    else
+        enable_threadstop = true;
 
     // if (!atoi(setting[10].c_str())) enable_lkh = false;
     // else enable_lkh = true;
@@ -712,6 +714,15 @@ void solver::enumerate()
         path_node active_node;
         while (local_pools->pop_from_active_list(thread_id, active_node))
         {
+            if (enable_threadstop)
+            {
+                // COMMENT: we are comparing the active_node(thread_id, last_node) with the request_buffer(thread_id, request_buffer)
+                // Don't we need other parameters such as depth, prefix_cost or  history_key
+                if (check_stop_request(thread_id, active_node.sequence))
+                {
+                    continue;
+                }
+            }
             if (enumeration_pre_check(active_node))
                 continue; // enumeration-time backtracking, and other preprocessing
 
@@ -1376,6 +1387,71 @@ void solver::print_state(sop_state &state)
         std::cout << state.depCnt[i] << " ";
     std::cout << std::endl;
 }
+bool solver::check_stop_request(int thread_id, const vector<int> &thread_sequence)
+{
+    buffer_lock.lock(); // Lock the buffer for safe access
+
+    // Check if the stop signal is true
+    if (!stop_sig.load())
+    {
+        buffer_lock.unlock();
+        return false; // No stop request has been signaled
+    }
+    // Check if there are any requests in the buffer
+    if (request_buffer.empty())
+    {
+        buffer_lock.unlock();
+        return false; // No entry found for request buffer
+    }
+
+    for (auto it = request_buffer.begin(); it != request_buffer.end(); ++it)
+    {
+        // checking request_buffer target_thread with our current thread
+        if (it->target_thread == thread_id)
+        {
+            stop_cnt++;
+
+            // if we found the target node as the last node of the sequence, we will remove that entry from the request_buffer
+            if (it->target_last_node == thread_sequence.back())
+            {
+                // Found a stop request targeting this thread
+                request_buffer.erase(it); // Remove the found request
+                if (request_buffer.size() == 0)
+                    stop_sig = false;
+                buffer_lock.unlock();
+                return true; // Indicate that a stop request was found and handled
+            }
+
+            boost::dynamic_bitset<> key(instance_size);
+
+            // Iterate over the 'sequence' and set the corresponding bit in 'history_key'.
+            for (int index : thread_sequence)
+            {
+                key.set(static_cast<std::size_t>(index));
+            }
+            // for comparison purpose
+            boost::dynamic_bitset<> temp_key(instance_size);
+            temp_key = key;
+
+            key.set(static_cast<std::size_t>(it->target_last_node));
+
+            if (temp_key != key)
+            {
+                stop_cnt--;
+                // keys are not equal which indicates that the target node is not there in the sequence
+                buffer_lock.unlock();
+                return false; // Indicate that a stop request was found but didn't fulfil the criteria
+            }
+
+            // keys are equal
+            buffer_lock.unlock();
+            return true; // Indicate that a stop request was found and handled
+        }
+    }
+    buffer_lock.unlock();
+    return false;
+}
+
 /* END DIAGNOSTIC FUNCTIONS */
 
 // bool shared_pool_sort(const path_node& src, const path_node& dest) {
