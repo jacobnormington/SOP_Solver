@@ -23,7 +23,7 @@ extern "C" {
     // static int tgroup_ratio = 0;                 //
     //static bool enable_workstealing = false;
     static bool enable_threadstop = false;
-    static bool enable_lkh = true;
+    static bool enable_lkh = false;
     // static bool enable_progress_estimation = false;
 
     //derived attributes
@@ -184,8 +184,8 @@ void solver::assign_parameter(vector<string> setting) {
     // if (!atoi(setting[9].c_str())) enable_threadstop = false;
     // else enable_threadstop = true;
 
-    // if (!atoi(setting[10].c_str())) enable_lkh = false;
-    // else enable_lkh = true;
+    if (!atoi(setting[10].c_str())) enable_lkh = false;
+    else enable_lkh = true;
 
     // if (!atoi(setting[11].c_str())) enable_progress_estimation = false;
     // else enable_progress_estimation = true;
@@ -201,6 +201,8 @@ void solver::solve(string f_name, int thread_num) {
 
     if (enable_lkh) thread_total = thread_num - 1;
     else thread_total = thread_num;
+    if(thread_total > global_pool_size)
+        global_pool_size = thread_total;
     filename = f_name;
     retrieve_input();
     transitive_redundancy();
@@ -528,6 +530,7 @@ void solver::solve_parallel() {
         enumerated_nodes[i] = 0;
     }
 
+    cout << "Starting Enumeration" <<endl;
     for (int i = 0; i < thread_total; i++) {
         Thread_manager[i] = thread(&solver::enumerate,move(solvers[i]));
         active_threads++;
@@ -544,6 +547,8 @@ void solver::solve_parallel() {
 
     return;
 }
+
+int targetTime = 0;
 
 void solver::enumerate(){
 
@@ -575,6 +580,8 @@ void solver::enumerate(){
                 }
 
                 if (problem_state.current_path.size() == (size_t)instance_size) { //if you've reached a leaf node (complete solution)
+                 work_remaining[thread_id] = work_remaining[thread_id] - problem_state.work_above;
+                 problem_state.work_above = 0;
                     if(problem_state.current_cost < best_cost) {
                         best_solution_lock.lock();
                         if(problem_state.current_cost < best_cost) { //make sure it is still true
@@ -588,10 +595,10 @@ void solver::enumerate(){
                                         bestBB_tour[i] = best_solution[i] + 1;
                                     BB_SolFound = true;
                                 }
-
+                               
                                 //DIAGNOSTIC: best cost
-                                std::cout << "Best Cost = " << best_cost << " Found in Thread " << thread_id; //TODO: add toggle
-                                std::cout << " at time = " << main_timer.get_time_seconds() << std::endl; 
+                                // std::cout << "Best Cost = " << best_cost << " Found in Thread " << thread_id; //TODO: add toggle
+                                // std::cout << " at time = " << main_timer.get_time_seconds() << std::endl; 
                             }
                             pthread_mutex_unlock(&Sol_lock);
                         }
@@ -635,13 +642,18 @@ void solver::enumerate(){
                 problem_state.history_key.second = source_node;
             }
         }
-         
+         if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
         //PROGRESS 
         unsigned long long next_work_above = problem_state.work_above / ready_node_count;
         unsigned long long remainder = problem_state.work_above % ready_node_count;
         work_remaining[thread_id] = work_remaining[thread_id] - next_work_above * pruned_count;
+        
+        // if(thread_id == 0){
+        //     cout << remainder << endl;
+        // }
+    
         for(unsigned i = 0; i < ready_list.size(); i++){
-            if(i < remainder){
+            if(i >= ready_list.size() - remainder){
                 ready_list[i].current_node_value = next_work_above + 1;
             } else{
                 ready_list[i].current_node_value = next_work_above;
@@ -652,7 +664,7 @@ void solver::enumerate(){
         //enumerated_nodes[thread_id] += ready_node_count;
        
         //Sort the ready list and push into local pool
-        if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
+        
         local_pools->push_list(thread_id, ready_list);
 
         int lb_liminsert = problem_state.lower_bound; //save lower bound through enumeration for limit insertion in the history table
@@ -697,6 +709,16 @@ void solver::enumerate(){
             problem_state.current_path.pop_back();
 
             if (thread_id == 0){ //check if out of time
+                if((main_timer.get_time_seconds()) >= targetTime){
+                    local_pools->print();
+                    targetTime += 10;
+                    for(int i = 0; i < work_remaining.size();i++){
+                        cout << i <<": " << work_remaining[i] << ", ";
+                    }
+                    cout <<endl;
+                }
+                
+
                 if (main_timer.get_time_seconds() > t_limit){
                     time_out = true;
                     active_threads = 0;
@@ -1124,6 +1146,8 @@ void solver::push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,
 /* BEGIN WORK STEALING*/
 //WORKSTEALING
 bool solver::workload_request(){
+   work_remaining[thread_id] = 0;
+
     if(!global_pool.empty()){
 
         global_pool_lock.lock();
@@ -1139,9 +1163,16 @@ bool solver::workload_request(){
    // if (enable_workstealing) {
     path_node new_node;
     active_threads--;
+    
+        cout << thread_id << " starting Workstealing at " << main_timer.get_time_seconds() << endl;
+        cout << "active threads " << active_threads << endl;
+        //local_pools->print();
     while(true){
-        if(active_threads == 0)  
+        if(active_threads <= 0)  {
+            
+                cout << thread_id << " Failed Workstealing at " << main_timer.get_time_seconds() << endl;
             return false;
+        }
         int target = local_pools->choose_victim(thread_id, work_remaining);
         if(target == -1) continue;
         if(local_pools->pop_from_zero_list(target, new_node)){
@@ -1149,6 +1180,8 @@ bool solver::workload_request(){
             problem_state = generate_solver_state(new_node);
             problem_state.work_above = new_node.current_node_value;
             active_threads++; 
+            
+            cout << thread_id << " finished Workstealing at " << main_timer.get_time_seconds()  << "  " << local_pools->active_pool_size(thread_id)<< endl;
             return true;
         }
     }

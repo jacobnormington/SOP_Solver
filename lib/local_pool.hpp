@@ -42,6 +42,8 @@
             int choose_victim(int thread_number,std::vector<std::atomic<unsigned long long>>& work_remaining);
 
             int active_pool_size(int thread_number); //diagnostic
+
+            void print(); //prints the size of all pools
     };
 
 #endif
