@@ -158,6 +158,42 @@ void lkh() {
 }
 /* ---------------------       END        -------------------------*/
 /* --------------------- Static Functions -------------------------*/
+static deque<unsigned long long> bigNum;
+static mutex bigNumLock;
+
+void bigNumPrint(){
+    bigNumLock.lock();
+    cout << bigNum.front() <<",  " << bigNum.size() <<endl;
+    bigNumLock.unlock();
+}
+
+void addFull(){
+    bigNumLock.lock();
+    bigNum.push_back(ULLONG_MAX);
+    bigNumLock.unlock();
+}
+
+void subtract(unsigned long long n){
+    bigNumLock.lock();
+    if(bigNum.empty()){
+        cout << "ERROR: overtrimming" << endl;
+        bigNumLock.unlock();
+        return;
+    }
+
+    if(n > bigNum.front()){
+        n -= bigNum.front();
+        bigNum.pop_front();
+        if(bigNum.empty()){
+            cout << "ERROR: overtrimming" << endl;
+            bigNumLock.unlock();
+            return;
+        }
+    }
+    bigNum.front() -= n;
+    bigNumLock.unlock();
+}
+
 
 void solver::assign_parameter(vector<string> setting) {
     t_limit = atoi(setting[0].c_str());
@@ -197,6 +233,10 @@ void solver::solve(string f_name, int thread_num) {
     if (thread_num < 1) {
         std::cerr << "Invalid Thread Number Input" << std::endl;
         exit(EXIT_FAILURE);
+    }
+
+    for(int i = 0; i < 31; i++){
+        addFull();
     }
 
     if (enable_lkh) thread_total = thread_num - 1;
@@ -553,6 +593,7 @@ int targetTime = 0;
 void solver::enumerate(){
 
     while(!time_out){
+        
         //PROGRESS variables
         int ready_node_count = 0;
         int pruned_count = 0;     
@@ -580,7 +621,11 @@ void solver::enumerate(){
                 }
 
                 if (problem_state.current_path.size() == (size_t)instance_size) { //if you've reached a leaf node (complete solution)
+                if(problem_state.work_above > work_remaining[thread_id]){
+                    cout << thread_id << " is overtriming leaf: " << problem_state.work_above << " ,remainder: " << work_remaining[thread_id] <<endl;
+                }
                  work_remaining[thread_id] = work_remaining[thread_id] - problem_state.work_above;
+                 subtract(problem_state.work_above);
                  problem_state.work_above = 0;
                     if(problem_state.current_cost < best_cost) {
                         best_solution_lock.lock();
@@ -633,6 +678,7 @@ void solver::enumerate(){
                     continue;
                 }
                 
+                
                 //"good" node, add it to the ready_list, then reset problem state
                 path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node);
                 ready_list.push_back(temp);
@@ -644,9 +690,27 @@ void solver::enumerate(){
         }
          if (!ready_list.empty()) std::sort(ready_list.begin(), ready_list.end(), local_pool_sort);
         //PROGRESS 
+        
         unsigned long long next_work_above = problem_state.work_above / ready_node_count;
         unsigned long long remainder = problem_state.work_above % ready_node_count;
+
+        // if(thread_id == 27)
+        //     cout << work_remaining[27] <<",    " <<  next_work_above * pruned_count <<endl;
+        if(next_work_above * pruned_count > work_remaining[thread_id]){
+            cout << thread_id << " is overtriming trim: " << next_work_above * pruned_count << " ,remainder: " << work_remaining[thread_id] <<endl;
+        }
+        subtract(next_work_above * pruned_count);
         work_remaining[thread_id] = work_remaining[thread_id] - next_work_above * pruned_count;
+        if( problem_state.work_above != remainder + next_work_above * (pruned_count + ready_list.size())){
+            cout << "not spliting correctly " <<endl;
+        }
+        if(remainder > ready_list.size()){
+            work_remaining[thread_id]  = work_remaining[thread_id] - (remainder - ready_list.size());
+            subtract(remainder - ready_list.size());
+        }
+
+        
+        
         
         // if(thread_id == 0){
         //     cout << remainder << endl;
@@ -693,6 +757,7 @@ void solver::enumerate(){
 
             enumerate();
 
+problem_state.work_above = active_node.current_node_value;
 
 
             /* Untake */
@@ -708,7 +773,7 @@ void solver::enumerate(){
             problem_state.taken_arr[taken_node] = false;
             problem_state.current_path.pop_back();
 
-            if (thread_id == 0){ //check if out of time
+            if (thread_id == 0 || active_threads == 1){ //check if out of time
                 if((main_timer.get_time_seconds()) >= targetTime){
                     local_pools->print();
                     targetTime += 10;
@@ -716,6 +781,7 @@ void solver::enumerate(){
                         cout << i <<": " << work_remaining[i] << ", ";
                     }
                     cout <<endl;
+                    bigNumPrint();
                 }
                 
 
@@ -1058,7 +1124,7 @@ bool solver::enumeration_pre_check(path_node& active_node){
         //     estimated_trimmed_percent[thread_id] += active_node.current_node_value; //add the value of this node you are trimming
         //PROGRESS
         work_remaining[thread_id] = work_remaining[thread_id] - active_node.current_node_value;
-
+        subtract(active_node.current_node_value);
         // cur_active_tree.incre_children_cnt(Allocator);
         // if (active_node.his_entry != NULL && active_node.his_entry->active_threadID == thread_id) {
         //     active_node.his_entry->explored = true;
@@ -1146,13 +1212,18 @@ void solver::push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,
 /* BEGIN WORK STEALING*/
 //WORKSTEALING
 bool solver::workload_request(){
-   work_remaining[thread_id] = 0;
-
+    if(work_remaining[thread_id] != 0){
+        cout << thread_id << " is at workstealing with work remaining = " <<work_remaining[thread_id] << endl;
+        work_remaining[thread_id] = 0;
+    }
     if(!global_pool.empty()){
 
         global_pool_lock.lock();
         if(!global_pool.empty()){
             problem_state = generate_solver_state(global_pool.back());
+            problem_state.work_above = ULLONG_MAX;
+            work_remaining[thread_id] = problem_state.work_above;
+            addFull();
             global_pool.pop_back();
             global_pool_lock.unlock();
             return true;
@@ -1179,6 +1250,7 @@ bool solver::workload_request(){
             work_remaining[target] = work_remaining[target] - new_node.current_node_value;
             problem_state = generate_solver_state(new_node);
             problem_state.work_above = new_node.current_node_value;
+            work_remaining[thread_id] = new_node.current_node_value;
             active_threads++; 
             
             cout << thread_id << " finished Workstealing at " << main_timer.get_time_seconds()  << "  " << local_pools->active_pool_size(thread_id)<< endl;
