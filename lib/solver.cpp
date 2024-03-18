@@ -184,8 +184,8 @@ void solver::assign_parameter(vector<string> setting) {
     // if (!atoi(setting[9].c_str())) enable_threadstop = false;
     // else enable_threadstop = true;
 
-    // if (!atoi(setting[10].c_str())) enable_lkh = false;
-    // else enable_lkh = true;
+    if (!atoi(setting[10].c_str())) enable_lkh = false;
+    else enable_lkh = true;
 
     // if (!atoi(setting[11].c_str())) enable_progress_estimation = false;
     // else enable_progress_estimation = true;
@@ -201,6 +201,8 @@ void solver::solve(string f_name, int thread_num) {
 
     if (enable_lkh) thread_total = thread_num - 1;
     else thread_total = thread_num;
+    if(thread_total > global_pool_size)
+        global_pool_size = thread_total;
     filename = f_name;
     retrieve_input();
     transitive_redundancy();
@@ -1140,7 +1142,7 @@ bool solver::workload_request(){
     path_node new_node;
     active_threads--;
     while(true){
-        if(active_threads == 0)  
+        if(active_threads <= 0)  
             return false;
         int target = local_pools->choose_victim(thread_id, work_remaining);
         if(target == -1) continue;

@@ -6,7 +6,10 @@
             return false;
         locks[thread_number].lock();
 
-        if (pools[thread_number].size() <= 1 || pools[thread_number].front().empty()){
+        while(pools[thread_number].front().empty() && pools[thread_number].size() > 1) pools[thread_number].pop_front();
+
+
+        if (pools[thread_number].size() <= 1){
             locks[thread_number].unlock();
             return false;
         }
@@ -26,9 +29,9 @@
 
         if (pools[thread_number].size() == 0)
             return false;
-        if (pools[thread_number].size() == 1){
-            locks[thread_number].lock();
-        }
+        // if (pools[thread_number].size() == 1){
+        //     locks[thread_number].lock();
+        // }
 
         if (pools[thread_number].size() == 0 || pools[thread_number].back().empty()){
             if (pools[thread_number].size() == 1){
@@ -40,9 +43,9 @@
         result_node = pools[thread_number].back().back();
         pools[thread_number].back().pop_back();
 
-        if (pools[thread_number].size() == 1){
-            locks[thread_number].unlock();
-        }
+        // if (pools[thread_number].size() == 1){
+        //     locks[thread_number].unlock();
+        // }
         return true;
     };
 
@@ -75,20 +78,26 @@
     //     return return_value;
     // }
 
+    // int local_pool::choose_victim(int thread_number, std::vector<std::atomic<unsigned long long>>& work_remaining){
+    //     workstealing_lock.lock();
+    //     double max_value = 0;
+    //     int max_id = -1;
+    //     for(int i = 0; i < thread_count; i++){
+    //         if(i == thread_number)
+    //             continue;
+    //         if(work_remaining[i] > max_value){
+    //             max_value = work_remaining[i];
+    //             max_id = i;
+    //         }
+    //     }
+    //     workstealing_lock.unlock();
+    //     return max_id;
+    // }
+
     int local_pool::choose_victim(int thread_number, std::vector<std::atomic<unsigned long long>>& work_remaining){
-        workstealing_lock.lock();
-        double max_value = 0;
-        int max_id = -1;
-        for(int i = 0; i < thread_count; i++){
-            if(i == thread_number)
-                continue;
-            if(work_remaining[i] > max_value){
-                max_value = work_remaining[i];
-                max_id = i;
-            }
-        }
-        workstealing_lock.unlock();
-        return max_id;
+        int target = rand() % 30;
+        while(target == thread_number) target = rand() % 30;
+        return target;
     }
 
     int local_pool::active_pool_size(int thread_number) { //TODO: this is not strictly necessary
