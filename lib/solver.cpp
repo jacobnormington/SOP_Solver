@@ -241,9 +241,11 @@ void solver::solve(string f_name, int thread_num)
     {
         for (unsigned k = 0; k < dependency_graph[i].size(); k++)
         {
+
             problem_state.depCnt[dependency_graph[i][k]]++;
         }
     }
+
     default_state = problem_state; // a copy of problem_state, since structs are passed by value
     std::cout << "Instance size is " << instance_size - 2 << std::endl;
 
@@ -370,6 +372,11 @@ void solver::solve_parallel()
             ready_list.push_back(node(i));
         }
     }
+    // for (int i : problem_state.depCnt)
+    // {
+    //     std::cout << i << " ";
+    // }
+    // std::cout << " " << std::endl;
 
     // Process first generation of nodes (the ready list as defined above)
     sop_state initial_state = problem_state;
@@ -498,7 +505,7 @@ void solver::solve_parallel()
 
                 solvers[thread_cnt].problem_state = default_state;
                 int taken_node = -1;
-                int cur_node = problem.sequence.front();
+                int cur_node = problem.sequence.front(); // curr_node is 0
                 int size = problem.sequence.size();
                 solvers[thread_cnt].problem_state.current_path.push_back(0);
                 solvers[thread_cnt].problem_state.taken_arr[cur_node] = true;
@@ -593,14 +600,17 @@ void solver::enumerate()
             if (!problem_state.depCnt[taken_node] && !problem_state.taken_arr[taken_node])
             { // only consider nodes that haven't already been taken, and who have no remaining dependencies
                 ready_node_count++;
+
                 // triming
                 int source_node = problem_state.current_path.back();
-                problem_state.current_path.push_back(taken_node);
-                problem_state.current_cost += cost_graph[source_node][taken_node].weight;
                 int lower_bound = -1;
                 bool taken = false;
+
+                problem_state.current_path.push_back(taken_node);
                 problem_state.history_key.first[taken_node] = true;
                 problem_state.history_key.second = taken_node;
+                problem_state.current_cost += cost_graph[source_node][taken_node].weight;
+
                 HistoryNode *his_node = NULL;
                 // Active_Node* active_node = NULL;
 
@@ -645,10 +655,16 @@ void solver::enumerate()
                     continue;
                 }
 
+                // true: no entry exist in history table
+                // false: someone else is performing better than this node
+                // false: the improvement is not worth it (we are adding an entry in the request buffer)
+                // true: the improvement is worth it (we are adding an entry in the request buffer)
                 bool decision = history_utilization(problem_state.history_key, problem_state.current_cost, &lower_bound, &taken, &his_node);
+
                 if (!taken)
                 { // if there is no similar entry in the history table
                     lower_bound = dynamic_hungarian(source_node, taken_node);
+                    // TODO_VIKAS: can we check the lower bound with the best cost before inserting into the history table
                     if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size())
                         push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
                     else
@@ -666,6 +682,7 @@ void solver::enumerate()
                     if (his_node != NULL)
                     {
                         HistoryContent content = his_node->entry.load();
+                        // TODO_VIKAS: it will never be greater because prefix_cost is same as the problem_state current_cost
                         if (content.prefix_cost >= problem_state.current_cost)
                             his_node->explored = true;
                     }
@@ -685,11 +702,15 @@ void solver::enumerate()
         }
 
         // PROGRESS
+        // COMMENT:ready_node_count : number of nodes in the ready list
         unsigned long long next_work_above = problem_state.work_above / ready_node_count;
         unsigned long long remainder = problem_state.work_above % ready_node_count;
         work_remaining[thread_id] = work_remaining[thread_id] - next_work_above * pruned_count;
+
+        // COMMENT: Assigning work remaining for each path_node object in ready list
         for (unsigned i = 0; i < ready_list.size(); i++)
         {
+            // COMMENT: what we are doing here?
             if (i < remainder)
             {
                 ready_list[i].current_node_value = next_work_above + 1;
@@ -1215,11 +1236,10 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
     HistoryContent content = history_node->entry.load();
     *lowerbound = content.lower_bound;
 
-    if (cost >= content.prefix_cost)
-        return false;
-
     int target_ID = history_node->active_threadID; // find whoever was working in this subspace
     int imp = content.prefix_cost - cost;
+    if (cost >= content.prefix_cost || imp <= content.lower_bound - best_cost)
+        return false;
 
     if (!history_node->explored)
     { // TODO: thread stopping
@@ -1231,6 +1251,8 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
                 // num_stop[thread_id].val++;
                 request_buffer.push_front({problem_state.current_path.back(), (int)problem_state.current_path.size(),
                                            content.prefix_cost, target_ID, key.first});
+
+                // std::cout << "--" << key.first << std::endl;
                 if (!stop_sig)
                 {
                     stop_cnt = 0;
@@ -1397,6 +1419,7 @@ bool solver::check_stop_request(int thread_id, const vector<int> &thread_sequenc
         buffer_lock.unlock();
         return false; // No stop request has been signaled
     }
+
     // Check if there are any requests in the buffer
     if (request_buffer.empty())
     {
@@ -1409,46 +1432,34 @@ bool solver::check_stop_request(int thread_id, const vector<int> &thread_sequenc
         // checking request_buffer target_thread with our current thread
         if (it->target_thread == thread_id)
         {
-            stop_cnt++;
+            // if it's not same, its not the desired path_node that we want to prune
+            if (it->target_last_node != thread_sequence.back())
+                continue;
 
-            // if we found the target node as the last node of the sequence, we will remove that entry from the request_buffer
-            if (it->target_last_node == thread_sequence.back())
-            {
-                // Found a stop request targeting this thread
-                request_buffer.erase(it); // Remove the found request
-                if (request_buffer.size() == 0)
-                    stop_sig = false;
-                buffer_lock.unlock();
-                return true; // Indicate that a stop request was found and handled
-            }
+            // TODO_VIKAS: should we also check the size of thread_sequence with it->target_depth
 
-            boost::dynamic_bitset<> key(instance_size);
-
+            boost::dynamic_bitset<> key(instance_size, false);
             // Iterate over the 'sequence' and set the corresponding bit in 'history_key'.
-            for (int index : thread_sequence)
-            {
-                key.set(static_cast<std::size_t>(index));
-            }
-            // for comparison purpose
-            boost::dynamic_bitset<> temp_key(instance_size);
-            temp_key = key;
+            for (auto node : thread_sequence)
+                key[node] = true;
 
-            key.set(static_cast<std::size_t>(it->target_last_node));
-
-            if (temp_key != key)
+            if (key != it->key)
             {
-                stop_cnt--;
                 // keys are not equal which indicates that the target node is not there in the sequence
                 buffer_lock.unlock();
                 return false; // Indicate that a stop request was found but didn't fulfil the criteria
             }
 
             // keys are equal
+            request_buffer.erase(it); // Remove the found request
+            if (request_buffer.empty())
+                stop_sig = false;
+            stop_cnt++;
             buffer_lock.unlock();
             return true; // Indicate that a stop request was found and handled
         }
     }
-    buffer_lock.unlock();
+    buffer_lock.unlock(); // releasing the lock
     return false;
 }
 
