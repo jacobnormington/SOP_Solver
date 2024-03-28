@@ -26,7 +26,7 @@ Group_Thread_Count = 4
 Enable = 0
 
 //Thread Stopping (1 for enable 0 for disable)
-Enable = 0
+Enable = 1
 
 //Run in parallel with LKH (1 for enable 0 for disable)
 Enable = 0
