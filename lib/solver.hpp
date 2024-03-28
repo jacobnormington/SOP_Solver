@@ -175,7 +175,7 @@ private:
     void print_state(sop_state &state);
 
     // For checking, if any thread requested another thread to stop
-    bool check_stop_request(int thread_id, const vector<int> &thread_sequence);
+    bool check_stop_request(int thread_id, std::pair<boost::dynamic_bitset<>, int> key);
 
 public:
     /* Takes config information and defines all runtime parameters from those strings. */

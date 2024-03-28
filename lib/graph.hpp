@@ -46,6 +46,9 @@ public:
     // bool* invalid_ptr = NULL; //investigate
     // bool deprecated = false; //For Thread Stopping. if this node exists in a redundant subspace and so does not need to be processed
     unsigned long long current_node_value = -1; // the portion out of ULLONG_MAX of the working tree that is under this node
+    std::pair<boost::dynamic_bitset<>, int> history_key;
+    
+
 
     // Active_Path partial_active_path;
     // HistoryNode* root_his_node;
@@ -56,6 +59,14 @@ public:
         sequence = partial_path;
         lower_bound = lb;
         origin_node = origin;
+    }
+
+     path_node(std::vector<int> partial_path, int lb, int origin, std::pair<boost::dynamic_bitset<>, int> key)
+    {
+        sequence = partial_path;
+        lower_bound = lb;
+        origin_node = origin;
+        history_key = key;
     }
     // path_node(vector<int> sequence_src,int originate_src, int load_info_src,
     //             int best_costrecord_src, unsigned long long value, Active_Path temp_active_path,

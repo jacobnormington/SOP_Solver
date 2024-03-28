@@ -692,7 +692,7 @@ void solver::enumerate()
                 }
 
                 //"good" node, add it to the ready_list, then reset problem state
-                path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node);
+                path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node, problem_state.history_key);
                 ready_list.push_back(temp);
                 problem_state.current_path.pop_back();
                 problem_state.current_cost -= cost_graph[source_node][taken_node].weight;
@@ -739,7 +739,7 @@ void solver::enumerate()
             {
                 // COMMENT: we are comparing the active_node(thread_id, last_node) with the request_buffer(thread_id, request_buffer)
                 // Don't we need other parameters such as depth, prefix_cost or  history_key
-                if (check_stop_request(thread_id, active_node.sequence))
+                if (check_stop_request(thread_id, active_node.history_key))
                 {
                     continue;
                 }
@@ -1409,7 +1409,7 @@ void solver::print_state(sop_state &state)
         std::cout << state.depCnt[i] << " ";
     std::cout << std::endl;
 }
-bool solver::check_stop_request(int thread_id, const vector<int> &thread_sequence)
+bool solver::check_stop_request(int thread_id, pair<boost::dynamic_bitset<>, int> history_key_local_pool )
 {
     buffer_lock.lock(); // Lock the buffer for safe access
 
@@ -1433,17 +1433,12 @@ bool solver::check_stop_request(int thread_id, const vector<int> &thread_sequenc
         if (it->target_thread == thread_id)
         {
             // if it's not same, its not the desired path_node that we want to prune
-            if (it->target_last_node != thread_sequence.back())
+            if (it->target_last_node != history_key_local_pool.second)
                 continue;
 
             // TODO_VIKAS: should we also check the size of thread_sequence with it->target_depth
-
-            boost::dynamic_bitset<> key(instance_size, false);
-            // Iterate over the 'sequence' and set the corresponding bit in 'history_key'.
-            for (auto node : thread_sequence)
-                key[node] = true;
-
-            if (key != it->key)
+            
+            if (history_key_local_pool.first != it->key)
             {
                 // keys are not equal which indicates that the target node is not there in the sequence
                 buffer_lock.unlock();
