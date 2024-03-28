@@ -3,6 +3,9 @@
 #ifndef GRAPH_H
 #define GRAPH_H
 
+#include <boost/container/vector.hpp>
+#include <boost/dynamic_bitset.hpp>
+
 #include <vector>
 
 /* An edge in the cost graph, from src to dst with cost weight. */
