@@ -1131,6 +1131,7 @@ bool solver::workload_request(){
         global_pool_lock.lock();
         if(!global_pool.empty()){
             problem_state = generate_solver_state(global_pool.back());
+            local_pools->set_pool_depth(thread_id, 0);
             global_pool.pop_back();
             global_pool_lock.unlock();
             return true;
@@ -1146,7 +1147,7 @@ bool solver::workload_request(){
             return false;
         int target = local_pools->choose_victim(thread_id, work_remaining);
         if(target == -1) continue;
-        if(local_pools->pop_from_zero_list(target, new_node)){
+        if(local_pools->pop_from_zero_list(target, new_node, thread_id)){
             work_remaining[target] = work_remaining[target] - new_node.current_node_value;
             problem_state = generate_solver_state(new_node);
             problem_state.work_above = new_node.current_node_value;

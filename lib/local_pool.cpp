@@ -1,12 +1,15 @@
 #include "local_pool.hpp"
 #include <iostream>
 
-    bool local_pool::pop_from_zero_list(int thread_number, path_node &result_node){
+    bool local_pool::pop_from_zero_list(int thread_number, path_node &result_node, int stealing_thread){
         if (pools[thread_number].size() <= 1)
             return false;
         locks[thread_number].lock();
 
-        while(pools[thread_number].front().empty() && pools[thread_number].size() > 1) pools[thread_number].pop_front();
+        while(pools[thread_number].front().empty() && pools[thread_number].size() > 1) {
+            pools[thread_number].pop_front();
+            depths[thread_number]++;    
+        }
 
 
         if (pools[thread_number].size() <= 1){
@@ -16,9 +19,11 @@
         
         result_node = pools[thread_number].front().back();
         pools[thread_number].front().pop_back();
+        depths[stealing_thread] = depths[thread_number];
 
         if (pools[thread_number].front().empty()){
             pools[thread_number].pop_front();
+            depths[thread_number]++;
         }
 
         locks[thread_number].unlock();
@@ -98,6 +103,23 @@
         int target = rand() % 30;
         while(target == thread_number) target = rand() % 30;
         return target;
+    }
+
+    int local_pool::choose_victim(int thread_number, std::vector<std::atomic<unsigned long long>>& work_remaining){
+        int target = 0;
+        for(int i = 0; i < depths.size(); i++ ){
+            if(pools[i].size() == 0){
+                depths[i] = INT32_MAX;
+                continue;
+            }
+            if(depths[i] < depths[target])
+                target = i;
+        }
+        return target;
+    }
+
+    void local_pool::set_pool_depth(int thread, int depth){
+        depths[thread] = depth;
     }
 
     int local_pool::active_pool_size(int thread_number) { //TODO: this is not strictly necessary

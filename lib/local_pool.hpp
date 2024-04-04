@@ -15,6 +15,7 @@
         private:
             std::vector<spin_lock> locks;
             std::vector<std::deque<std::deque<path_node>>> pools;
+            std::vector<int> depths;
             
             //workstealing variables
             int thread_count;
@@ -24,10 +25,11 @@
             local_pool(int thread_count){
                 locks = std::vector<spin_lock>(thread_count);
                 pools = std::vector<std::deque<std::deque<path_node>>>(thread_count);
+                depths = std::vector<int>(thread_count);
                 this->thread_count = thread_count;
             }
             /*Grabs a node from the shallowest / zero pool*/
-            bool pop_from_zero_list(int thread_number, path_node &result_node);
+            bool pop_from_zero_list(int thread_number, path_node &result_node, int stealing_thread);
             /*Grabs a node from the deepest / active pool*/
             bool pop_from_active_list(int thread_number, path_node &result_node);
             /*Pushes new list to the back of the local pool*/
@@ -40,6 +42,8 @@
                 thread_number - this thread's number, to ensure you aren't recommended to steal from yourself
                 Return - the thread number of the thread to steal from */
             int choose_victim(int thread_number,std::vector<std::atomic<unsigned long long>>& work_remaining);
+
+            void set_pool_depth(int thread, int depth);
 
             int active_pool_size(int thread_number); //diagnostic
     };
