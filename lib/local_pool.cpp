@@ -79,34 +79,34 @@
     //     return return_value;
     // }
 
-    // int local_pool::choose_victim(int thread_number, std::vector<std::atomic<unsigned long long>>& work_remaining){
-    //     workstealing_lock.lock();
-    //     unsigned long long max_value = 0;
-    //     int max_id = -1;
-    //     for(int i = 0; i < thread_count; i++){
-    //         if(i == thread_number || pools[i].size() <= 1)
-    //             continue;
-    //         if(work_remaining[i] > max_value){
-    //             max_value = work_remaining[i];
-    //             max_id = i;
-    //         }
-    //     }
-    //     if(max_id == -1){
-    //         int target = rand() % 30;
-    //         while(target == thread_number) target = rand() % 30;
-    //         max_id = target;
-    //     }
-
-    //     //std::cout << "target: " << max_id;
-    //     workstealing_lock.unlock();
-    //     return max_id;
-    // }
-
     int local_pool::choose_victim(int thread_number, std::vector<std::atomic<unsigned long long>>& work_remaining){
-        int target = rand() % 30;
-        while(target == thread_number) target = rand() % 30;
-        return target;
+        workstealing_lock.lock();
+        unsigned long long max_value = 0;
+        int max_id = -1;
+        for(int i = 0; i < thread_count; i++){
+            if(i == thread_number || pools[i].size() <= 1)
+                continue;
+            if(work_remaining[i] > max_value){
+                max_value = work_remaining[i];
+                max_id = i;
+            }
+        }
+        // if(max_id == -1){
+        //     int target = rand() % 30;
+        //     while(target == thread_number) target = rand() % 30;
+        //     max_id = target;
+        // }
+
+        //std::cout << "target: " << max_id;
+        workstealing_lock.unlock();
+        return max_id;
     }
+
+    // int local_pool::choose_victim(int thread_number, std::vector<std::atomic<unsigned long long>>& work_remaining){
+    //     int target = rand() % 30;
+    //     while(target == thread_number) target = rand() % 30;
+    //     return target;
+    // }
 
     int local_pool::active_pool_size(int thread_number) { //TODO: this is not strictly necessary
         if(pools[thread_number].size() == 0) return 0;

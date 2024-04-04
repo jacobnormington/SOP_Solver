@@ -74,6 +74,9 @@ extern "C" {
     // static mutex Select_SharedMutex;
     // static mutex Resume_Lock;
     // static mutex launch_lck;
+    static mutex diagnostics_lock;
+    static int diagonstics_period = 10;
+    static float diagonstics_targetTime = 0;
 
     static atomic<bool> time_out (false);           //whether the instance has timed out
     static atomic<int> active_threads (0);          //the number of threads still working
@@ -156,6 +159,9 @@ void lkh() {
     }
     return;
 }
+
+
+
 /* ---------------------       END        -------------------------*/
 /* --------------------- Static Functions -------------------------*/
 static deque<unsigned long long> bigNum;
@@ -181,7 +187,7 @@ void subtract(unsigned long long n){
         return;
     }
 
-    if(n > bigNum.front()){
+    if(n >= bigNum.front()){
         n -= bigNum.front();
         bigNum.pop_front();
         if(bigNum.empty()){
@@ -192,6 +198,27 @@ void subtract(unsigned long long n){
     }
     bigNum.front() -= n;
     bigNumLock.unlock();
+}
+
+void print_diagnostics(){
+    if(main_timer.get_time_seconds() > diagonstics_targetTime){
+        diagnostics_lock.lock();
+        if(main_timer.get_time_seconds() <= diagonstics_targetTime){
+            diagnostics_lock.unlock();
+            return;
+        }
+        cout << main_timer.get_time_seconds() << endl;
+        local_pools->print();
+        for(int i = 0; i < (int)work_remaining.size();i++){
+            cout << i <<": " << work_remaining[i] << ", ";
+        }
+        cout <<endl;
+        cout << active_threads << endl;
+        bigNumPrint();
+
+        diagonstics_targetTime = main_timer.get_time_seconds() + diagonstics_period;
+        diagnostics_lock.unlock();
+    }
 }
 
 
@@ -572,6 +599,7 @@ void solver::solve_parallel() {
 
     cout << "Starting Enumeration" <<endl;
     for (int i = 0; i < thread_total; i++) {
+        solvers[i].problem_state.work_above = ULLONG_MAX;
         Thread_manager[i] = thread(&solver::enumerate,move(solvers[i]));
         active_threads++;
     }
@@ -590,13 +618,21 @@ void solver::solve_parallel() {
 
 int targetTime = 0;
 
+bool okthen = true;
 void solver::enumerate(){
-
+    if(problem_state.enumeration_depth == 0 && thread_id == 1){
+        okthen = false;
+         for(int i = 0; i < (int)work_remaining.size();i++){
+            cout << i <<": " << work_remaining[i] << ", ";
+        }
+    }
     while(!time_out){
+
+       // unsigned long long work_here = problem_state.work_above;
         
         //PROGRESS variables
-        int ready_node_count = 0;
-        int pruned_count = 0;     
+        unsigned long long ready_node_count = 0;
+        unsigned long long pruned_count = 0;     
 
         deque<path_node> ready_list;
         bool limit_insertion = false;
@@ -624,9 +660,9 @@ void solver::enumerate(){
                 if(problem_state.work_above > work_remaining[thread_id]){
                     cout << thread_id << " is overtriming leaf: " << problem_state.work_above << " ,remainder: " << work_remaining[thread_id] <<endl;
                 }
-                 work_remaining[thread_id] = work_remaining[thread_id] - problem_state.work_above;
-                 subtract(problem_state.work_above);
-                 problem_state.work_above = 0;
+                //  work_remaining[thread_id] = work_remaining[thread_id] - problem_state.work_above;
+                //  subtract(problem_state.work_above);
+                 //problem_state.work_above = 0;
                     if(problem_state.current_cost < best_cost) {
                         best_solution_lock.lock();
                         if(problem_state.current_cost < best_cost) { //make sure it is still true
@@ -694,18 +730,32 @@ void solver::enumerate(){
         unsigned long long next_work_above = problem_state.work_above / ready_node_count;
         unsigned long long remainder = problem_state.work_above % ready_node_count;
 
+        bool maxMeasureable = false;
+        unsigned long long last_work_above = 0;
+        if(next_work_above == 0){
+            maxMeasureable = true;
+            // subtract(remainder);
+            // work_remaining[thread_id] -= remainder;
+            last_work_above = problem_state.work_above;
+            remainder = 0;
+        }
         // if(thread_id == 27)
         //     cout << work_remaining[27] <<",    " <<  next_work_above * pruned_count <<endl;
         if(next_work_above * pruned_count > work_remaining[thread_id]){
             cout << thread_id << " is overtriming trim: " << next_work_above * pruned_count << " ,remainder: " << work_remaining[thread_id] <<endl;
         }
         subtract(next_work_above * pruned_count);
-        work_remaining[thread_id] = work_remaining[thread_id] - next_work_above * pruned_count;
-        if( problem_state.work_above != remainder + next_work_above * (pruned_count + ready_list.size())){
+        //work_remaining[thread_id] = work_remaining[thread_id] - next_work_above * pruned_count;
+        work_remaining[thread_id] -=next_work_above * pruned_count;
+        if( problem_state.work_above != remainder + last_work_above + next_work_above * (pruned_count + ready_list.size())){
             cout << "not spliting correctly " <<endl;
         }
+        if(pruned_count + ready_list.size() != ready_node_count){
+            cout << "missing branches" << endl;
+        }
         if(remainder > ready_list.size()){
-            work_remaining[thread_id]  = work_remaining[thread_id] - (remainder - ready_list.size());
+            //work_remaining[thread_id] = work_remaining[thread_id] - (remainder - ready_list.size());
+            work_remaining[thread_id] -= (remainder - ready_list.size());
             subtract(remainder - ready_list.size());
         }
 
@@ -773,17 +823,10 @@ problem_state.work_above = active_node.current_node_value;
             problem_state.taken_arr[taken_node] = false;
             problem_state.current_path.pop_back();
 
+
+            print_diagnostics();
+
             if (thread_id == 0 || active_threads == 1){ //check if out of time
-                if((main_timer.get_time_seconds()) >= targetTime){
-                    local_pools->print();
-                    targetTime += 10;
-                    for(int i = 0; i < work_remaining.size();i++){
-                        cout << i <<": " << work_remaining[i] << ", ";
-                    }
-                    cout <<endl;
-                    bigNumPrint();
-                }
-                
 
                 if (main_timer.get_time_seconds() > t_limit){
                     time_out = true;
@@ -796,6 +839,13 @@ problem_state.work_above = active_node.current_node_value;
 
         }
         local_pools->pop_active_list(thread_id); //TODO: make sure with thread stopping that this is handled properly
+
+        if(maxMeasureable){
+            if(last_work_above > work_remaining[thread_id])
+                cout << thread_id << " is overtriming at maxMeasure" << endl;
+            work_remaining[thread_id] -= last_work_above;
+            subtract(last_work_above);
+        }
 
         // if (stop_init && (int)problem_state.cur_solution.size() <= stop_depth) {
         //     stop_init = false;
@@ -1124,6 +1174,7 @@ bool solver::enumeration_pre_check(path_node& active_node){
         //     estimated_trimmed_percent[thread_id] += active_node.current_node_value; //add the value of this node you are trimming
         //PROGRESS
         work_remaining[thread_id] = work_remaining[thread_id] - active_node.current_node_value;
+        work_remaining[thread_id] -= active_node.current_node_value;
         subtract(active_node.current_node_value);
         // cur_active_tree.incre_children_cnt(Allocator);
         // if (active_node.his_entry != NULL && active_node.his_entry->active_threadID == thread_id) {
@@ -1247,6 +1298,7 @@ bool solver::workload_request(){
         int target = local_pools->choose_victim(thread_id, work_remaining);
         if(target == -1) continue;
         if(local_pools->pop_from_zero_list(target, new_node)){
+            //work_remaining[target] = work_remaining[target] - new_node.current_node_value;
             work_remaining[target] = work_remaining[target] - new_node.current_node_value;
             problem_state = generate_solver_state(new_node);
             problem_state.work_above = new_node.current_node_value;
