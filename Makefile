@@ -69,7 +69,8 @@ _LKH_OBJS = Activate.o AddCandidate.o AddExtraCandidates.o                  \
 		MergeWithTourGPX2.o gpx.o LKH.o
 
 PROG = sop_solver
-
+debug: CXXFLAG += -g
+debug: $(PROG)
 $(PROG): $(PBB_OBJS) $(LKH_OBJS)
 	$(CC) $(CXXFLAG) $(OPTIMIZATION_LINK) $(LINK) $(PROG) $^
 

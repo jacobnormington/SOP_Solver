@@ -175,7 +175,10 @@ private:
     void print_state(sop_state &state);
 
     // For checking, if any thread requested another thread to stop
-    bool check_stop_request(int thread_id, std::pair<boost::dynamic_bitset<>, int> key);
+    bool check_stop_request(int thread_id, std::pair<boost::dynamic_bitset<>, int> &history_key, std::vector<int> &sequence);
+
+    // for generating history_key
+    boost::dynamic_bitset<> generate_history_key(const vector<int> &sequence, int depth);
 
 public:
     /* Takes config information and defines all runtime parameters from those strings. */

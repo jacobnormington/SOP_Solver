@@ -179,8 +179,10 @@ void solver::assign_parameter(vector<string> setting)
     else
         enable_threadstop = true;
 
-    if (!atoi(setting[10].c_str())) enable_lkh = false;
-    else enable_lkh = true;
+    if (!atoi(setting[10].c_str()))
+        enable_lkh = false;
+    else
+        enable_lkh = true;
 
     // if (!atoi(setting[11].c_str())) enable_progress_estimation = false;
     // else enable_progress_estimation = true;
@@ -660,7 +662,6 @@ void solver::enumerate()
                 // false: the improvement is not worth it (we are adding an entry in the request buffer)
                 // true: the improvement is worth it (we are adding an entry in the request buffer)
                 bool decision = history_utilization(problem_state.history_key, problem_state.current_cost, &lower_bound, &taken, &his_node);
-
                 if (!taken)
                 { // if there is no similar entry in the history table
                     lower_bound = dynamic_hungarian(source_node, taken_node);
@@ -690,7 +691,6 @@ void solver::enumerate()
                     prune(source_node, taken_node);
                     continue;
                 }
-
                 //"good" node, add it to the ready_list, then reset problem state
                 path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node, problem_state.history_key);
                 ready_list.push_back(temp);
@@ -739,7 +739,7 @@ void solver::enumerate()
             {
                 // COMMENT: we are comparing the active_node(thread_id, last_node) with the request_buffer(thread_id, request_buffer)
                 // Don't we need other parameters such as depth, prefix_cost or  history_key
-                if (check_stop_request(thread_id, active_node.history_key))
+                if (check_stop_request(thread_id, active_node.history_key,active_node.sequence))
                 {
                     continue;
                 }
@@ -793,7 +793,6 @@ void solver::enumerate()
             }
         }
         local_pools->pop_active_list(thread_id); // TODO: make sure with thread stopping that this is handled properly
-
         // if (stop_init && (int)problem_state.cur_solution.size() <= stop_depth) {
         //     stop_init = false;
         //     stop_depth = -1;
@@ -1409,16 +1408,17 @@ void solver::print_state(sop_state &state)
         std::cout << state.depCnt[i] << " ";
     std::cout << std::endl;
 }
-bool solver::check_stop_request(int thread_id, pair<boost::dynamic_bitset<>, int> history_key_local_pool )
+
+bool solver::check_stop_request(int thread_id, std::pair<boost::dynamic_bitset<>, int> &history_key, vector<int> &sequence)
 {
     buffer_lock.lock(); // Lock the buffer for safe access
 
     // Check if the stop signal is true
-    if (!stop_sig.load())
-    {
-        buffer_lock.unlock();
-        return false; // No stop request has been signaled
-    }
+    // if (!stop_sig.load())
+    // {
+    //     buffer_lock.unlock();
+    //     return false; // No stop request has been signaled
+    // }
 
     // Check if there are any requests in the buffer
     if (request_buffer.empty())
@@ -1427,35 +1427,96 @@ bool solver::check_stop_request(int thread_id, pair<boost::dynamic_bitset<>, int
         return false; // No entry found for request buffer
     }
 
-    for (auto it = request_buffer.begin(); it != request_buffer.end(); ++it)
+    // iterating request buffer
+    for (auto it = request_buffer.begin(); it != request_buffer.end();)
     {
-        // checking request_buffer target_thread with our current thread
-        if (it->target_thread == thread_id)
+        // thread_id must be same as targer thread
+        // target depth must be less than or equal to the current sequence
+        if (it->target_thread == thread_id && it->target_depth <= sequence.size())
         {
-            // if it's not same, its not the desired path_node that we want to prune
-            if (it->target_last_node != history_key_local_pool.second)
-                continue;
-
-            // TODO_VIKAS: should we also check the size of thread_sequence with it->target_depth
-            
-            if (history_key_local_pool.first != it->key)
+            // target_node must present at the same depth in the sequence
+            if (it->target_last_node == sequence[it->target_depth - 1])
             {
-                // keys are not equal which indicates that the target node is not there in the sequence
-                buffer_lock.unlock();
-                return false; // Indicate that a stop request was found but didn't fulfil the criteria
-            }
+                // target depth and the sequence size is same
+                // history_key in request buffer and current thread history_key must be same
+                if ((it->target_depth == sequence.size() && it->key == history_key.first))
+                {
+                    it = request_buffer.erase(it); // Remove the found request and get the next valid iterator
+                    stop_cnt++;
 
-            // keys are equal
-            request_buffer.erase(it); // Remove the found request
-            if (request_buffer.empty())
-                stop_sig = false;
-            stop_cnt++;
-            buffer_lock.unlock();
-            return true; // Indicate that a stop request was found and handled
+                    buffer_lock.unlock();
+                    return true; // Indicate that a stop request was found and handled
+                }
+                // target depth and the sequence size are not same
+                // built a history_key from current thread sequence until the depth of the target in buffer
+                // if its equal, we should prune but will not remove the entry from buffer
+                else if (it->target_depth != sequence.size() && it->key == generate_history_key(sequence, it->target_depth))
+                {
+                    stop_cnt++;
+                    buffer_lock.unlock();
+                    return true; // Indicate that a stop request was found and handled
+                }
+                else
+                {
+                    it = request_buffer.erase(it); // Remove the found request and get the next valid iterator
+                    buffer_lock.unlock();
+                    return false; // Indicate that a stop request was found and handled
+                }
+            }
         }
+        ++it;
     }
     buffer_lock.unlock(); // releasing the lock
     return false;
+}
+
+// for (auto it = request_buffer.begin(); it != request_buffer.end();)
+// {
+//     // thread_id must be same as targer thread
+//     // target depth must be less than or equal to the current sequence
+//     if (it->target_thread == thread_id && it->target_depth <= sequence.size())
+//     {
+//         // target_node must present at the same depth in the sequence
+//         if (it->target_last_node == sequence[it->target_depth - 1])
+//         {
+//             // target depth and the sequence size is same
+//             // history_key in request buffer and current thread history_key must be same
+//             if ((it->target_depth == sequence.size() && it->key == history_key.first))
+//             {
+//                 it = request_buffer.erase(it); // Remove the found request and get the next valid iterator
+//                 stop_cnt++;
+
+//                 buffer_lock.unlock();
+//                 return true; // Indicate that a stop request was found and handled
+//             }
+//             // target depth and the sequence size are not same
+//             // built a history_key from current thread sequence until the depth of the target in buffer
+//             // if its equal, we should prune but will not remove the entry from buffer
+//             else if (it->target_depth != sequence.size() && it->key == generate_history_key(sequence, it->target_depth))
+//             {
+//                 stop_cnt++;
+//                 buffer_lock.unlock();
+//                 return true; // Indicate that a stop request was found and handled
+//             }
+//             else
+//             {
+//                 it = request_buffer.erase(it); // Remove the found request and get the next valid iterator
+//                 buffer_lock.unlock();
+//                 return false; // Indicate that a stop request was found and handled
+//             }
+//         }
+//     }
+//     ++it;
+// }
+
+boost::dynamic_bitset<> solver::generate_history_key(const vector<int> &sequence, int depth)
+{
+    boost::dynamic_bitset<> temp_history_key(instance_size);
+    for (int i = 0; i < depth; ++i)
+    {
+        temp_history_key.set(sequence[i]);
+    }
+    return temp_history_key;
 }
 
 /* END DIAGNOSTIC FUNCTIONS */
@@ -1476,4 +1537,106 @@ bool solver::check_stop_request(int thread_id, pair<boost::dynamic_bitset<>, int
 // bool split_sort(const sop_state& src, const sop_state& dest) {
 //     if (src.current_path.size() == dest.cur_solution.size()) return src.load_info < dest.load_info;
 //     return src.cur_solution.size() < dest.cur_solution.size();
+// }
+
+// bool solver::check_stop_request(int thread_id, std::pair<boost::dynamic_bitset<>, int> &history_key, vector<int> &sequence)
+// {
+//     if (!buffer_lock.try_lock())
+//         return false;
+//     // buffer_lock.lock(); // Lock the buffer for safe access
+
+//     // Check if the stop signal is true
+//     // if (!stop_sig.load())
+//     // {
+//     //     buffer_lock.unlock();
+//     //     return false; // No stop request has been signaled
+//     // }
+
+//     // Check if there are any requests in the buffer
+//     if (request_buffer.empty())
+//     {
+//         buffer_lock.unlock();
+//         return false; // No entry found for request buffer
+//     }
+
+//     // iterating request buffer
+//     for (auto it = request_buffer.begin(); it != request_buffer.end();)
+//     {
+//         // thread_id must be same as targer thread
+//         // target depth must be less than or equal to the current sequence
+//         if (it->target_thread == thread_id && it->target_depth <= sequence.size())
+//         {
+//             // target_node must present at the same depth in the sequence
+//             if (it->target_last_node == sequence[it->target_depth - 1])
+//             {
+//                 // target depth and the sequence size is same
+//                 // history_key in request buffer and current thread history_key must be same
+//                 if ((it->target_depth == sequence.size() && it->key == history_key.first))
+//                 {
+//                     it = request_buffer.erase(it); // Remove the found request and get the next valid iterator
+//                     stop_cnt++;
+
+//                     buffer_lock.unlock();
+//                     return true; // Indicate that a stop request was found and handled
+//                 }
+//                 // target depth and the sequence size are not same
+//                 // built a history_key from current thread sequence until the depth of the target in buffer
+//                 // if its equal, we should prune but will not remove the entry from buffer
+//                 else if (it->target_depth != sequence.size() && it->key == generate_history_key(sequence, it->target_depth))
+//                 {
+//                     stop_cnt++;
+//                     buffer_lock.unlock();
+//                     return true; // Indicate that a stop request was found and handled
+//                 }
+//                 else
+//                 {
+//                     it = request_buffer.erase(it); // Remove the found request and get the next valid iterator
+//                     buffer_lock.unlock();
+//                     return false; // Indicate that a stop request was found and handled
+//                 }
+//             }
+//         }
+//         ++it;
+//     }
+//     buffer_lock.unlock(); // releasing the lock
+//     return false;
+// }
+
+// for (auto it = request_buffer.begin(); it != request_buffer.end();)
+// {
+//     // thread_id must be same as targer thread
+//     // target depth must be less than or equal to the current sequence
+//     if (it->target_thread == thread_id && it->target_depth <= sequence.size())
+//     {
+//         // target_node must present at the same depth in the sequence
+//         if (it->target_last_node == sequence[it->target_depth - 1])
+//         {
+//             // target depth and the sequence size is same
+//             // history_key in request buffer and current thread history_key must be same
+//             if ((it->target_depth == sequence.size() && it->key == history_key.first))
+//             {
+//                 it = request_buffer.erase(it); // Remove the found request and get the next valid iterator
+//                 stop_cnt++;
+
+//                 buffer_lock.unlock();
+//                 return true; // Indicate that a stop request was found and handled
+//             }
+//             // target depth and the sequence size are not same
+//             // built a history_key from current thread sequence until the depth of the target in buffer
+//             // if its equal, we should prune but will not remove the entry from buffer
+//             else if (it->target_depth != sequence.size() && it->key == generate_history_key(sequence, it->target_depth))
+//             {
+//                 stop_cnt++;
+//                 buffer_lock.unlock();
+//                 return true; // Indicate that a stop request was found and handled
+//             }
+//             else
+//             {
+//                 it = request_buffer.erase(it); // Remove the found request and get the next valid iterator
+//                 buffer_lock.unlock();
+//                 return false; // Indicate that a stop request was found and handled
+//             }
+//         }
+//     }
+//     ++it;
 // }
