@@ -5,22 +5,27 @@
 using namespace std;
 #define ACTIVE_BLK_SIZE 81920
 
-Active_Allocator::Active_Allocator() {
+Active_Allocator::Active_Allocator()
+{
     Active_Block = new Active_Node[ACTIVE_BLK_SIZE];
     counter = 0;
 }
 
-Active_Node* Active_Allocator::assign_node() {
-    Active_Node* node = NULL;
-    if (Reuse_Node.empty()) {
-        if (counter >= ACTIVE_BLK_SIZE) {
+Active_Node *Active_Allocator::assign_node()
+{
+    Active_Node *node = NULL;
+    if (Reuse_Node.empty())
+    {
+        if (counter >= ACTIVE_BLK_SIZE)
+        {
             Active_Block = new Active_Node[ACTIVE_BLK_SIZE];
             counter = 0;
         }
         node = Active_Block + counter;
         counter++;
     }
-    else {
+    else
+    {
         node = Reuse_Node.back();
         Reuse_Node.pop_back();
     }
@@ -31,7 +36,9 @@ Active_Node* Active_Allocator::assign_node() {
     return node;
 }
 
-void Active_Allocator::delete_node(Active_Node* node) {
-    if (node != NULL) Reuse_Node.push_back(node);
+void Active_Allocator::delete_node(Active_Node *node)
+{
+    if (node != NULL)
+        Reuse_Node.push_back(node);
     return;
 }

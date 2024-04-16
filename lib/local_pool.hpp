@@ -1,5 +1,5 @@
 #ifndef LOCAL_H
-    #define LOCAL_H
+#define LOCAL_H
 
     #include <deque> //for the local pool structure
     #include <queue>
@@ -7,6 +7,16 @@
     #include "synchronization.hpp"
     #include "graph.hpp"
 
+
+/* The local pool construct, consisting of pools of nodes for each thread. In
+    each thread, the pool is organized by depth, so that nodes are stolen from
+    only the shallowest part of the pool, and added at the deepest level. */
+class local_pool
+{
+    // TODO: should we instead use a priority queue here, a heap implementation instead of naively just a list of lists?
+private:
+    std::vector<spin_lock> locks;
+    std::vector<std::deque<std::deque<path_node>>> pools;
 
     /* The local pool construct, consisting of pools of nodes for each thread. In 
         each thread, the pool is organized by depth, so that nodes are stolen from 
@@ -35,7 +45,6 @@
 
             std::priority_queue<std::vector<int>, std::vector<std::vector<int>>, my_comparator> depth_queue;
 
-
         public:
         std::vector<int> depths;
             local_pool(int thread_count);
@@ -61,5 +70,6 @@
 
             void print();
     };
+
 
 #endif
