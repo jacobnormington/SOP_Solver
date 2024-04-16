@@ -88,36 +88,6 @@ static timer main_timer; // when solve_parallel started (before processing begin
 
 /////////////////////////////////////////
 
-///////////Synchronization Variables/////
-// pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;   //lock for any updates to best_solution and its cost
-static mutex best_solution_lock;
-static mutex global_pool_lock; // lock for getting nodes from the global pool
-// static mutex Split_lock;
-// static mutex asssign_mutex;
-// static mutex thread_load_mutex;
-// static condition_variable Idel;
-// static condition_variable Thread_Stop_Check;
-// static condition_variable Resume_State;
-// static vector<int> selected_orgin;
-// static mutex Select_Mutex;
-// static mutex Select_SharedMutex;
-// static mutex Resume_Lock;
-// static mutex launch_lck;
-
-static atomic<bool> time_out(false);  // whether the instance has timed out
-static atomic<int> active_threads(0); // the number of threads still working
-// static atomic<int> selected_thread (-1);
-// static atomic<int> restart_cnt (0);
-// static atomic<int> total_restarts (0);
-// static atomic<unsigned> idle_counter (0);
-// static atomic<size_t> resload_cnt (0);
-// static atomic<bool> limit_insert (false);
-// static atomic<bool> check_status_safe (true);
-// static atomic<bool> resume_success (true);
-// static atomic<bool> resume_check (false);
-// static atomic<bool> exploit_init (false);
-/////////////////////////////////////////
-
 ///////////Thread Stopping Variables/////
 static deque<request_packet> request_buffer; //
 static mutex buffer_lock;                    // lock for accessing the request_buffer
