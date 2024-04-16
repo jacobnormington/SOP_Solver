@@ -91,10 +91,15 @@ static timer main_timer; // when solve_parallel started (before processing begin
 ///////////Thread Stopping Variables/////
 static deque<request_packet> request_buffer; //
 static mutex buffer_lock;                    // lock for accessing the request_buffer
+// static vector<thread_request> thread_requests;
+static vector<thread_request> thread_requests(32);
+
 // static mutex pause_lock;                       //
 // static mutex ptselct_lock;                     //
-static atomic<bool> stop_sig(false); // if any threads are currently being requested to stop
-static atomic<int> stop_cnt(0);      // how many threads should stop
+static atomic<bool> stop_sig(false);               // if any threads are currently being requested to stop
+static atomic<int> thread_stop_requested(0);
+static atomic<int> thread_stop_check(0);
+static atomic<int> thread_stopped_successfully(0); // how many threads should stop
 /////////////////////////////////////////
 
 ///////////Work Stealing Variables///////
@@ -207,8 +212,10 @@ void solver::assign_parameter(vector<string> setting)
     else
         enable_threadstop = true;
 
-    if (!atoi(setting[10].c_str())) enable_lkh = false;
-    else enable_lkh = true;
+    if (!atoi(setting[10].c_str()))
+        enable_lkh = false;
+    else
+        enable_lkh = true;
 
     // if (!atoi(setting[11].c_str())) enable_progress_estimation = false;
     // else enable_progress_estimation = true;
@@ -280,6 +287,11 @@ void solver::solve(string f_name, int thread_num)
     // thread_load = new load_stats [thread_total];
     local_pools = new local_pool(thread_total);
     history_table.initialize(thread_total);
+    // thread_requests.resize(thread_total);
+    // for (int i = 0; i < thread_total; ++i)
+    // {
+    //     thread_requests[i] = std::make_unique<thread_request>();
+    // }
 
     // abandon_wlk_array = vector<bool_64>(thread_total);
     // num_resume = vector<int_64>(thread_total);
@@ -322,9 +334,19 @@ void solver::solve(string f_name, int thread_num)
     auto total_time = chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     std::cout << "------------------------" << thread_total << " thread"
               << "------------------------------" << std::endl;
+    cout << "thread stop requested: " << thread_stop_requested << "\n";
+    cout << "thread stop check: " << thread_stop_check << "\n";
+    cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
+
     std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
               << std::endl;
 
+    // std::cout << "Best solution path: ";
+    // for (int element : best_solution)
+    // {
+    //     std::cout << element << ", ";
+    // }
+    // std::cout << std::endl;
 
     ///// BEGIN DIAGNOSTICS /////
 
@@ -698,7 +720,6 @@ void solver::enumerate(){
                 // false: the improvement is not worth it (we are adding an entry in the request buffer)
                 // true: the improvement is worth it (we are adding an entry in the request buffer)
                 bool decision = history_utilization(problem_state.history_key, problem_state.current_cost, &lower_bound, &taken, &his_node);
-
                 if (!taken)
                 { // if there is no similar entry in the history table
                     lower_bound = dynamic_hungarian(source_node, taken_node);
@@ -706,7 +727,10 @@ void solver::enumerate(){
                     if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size())
                         push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
                     else
+                    {
+                        // std::cout<<"limit insertion is true"<<std::endl;
                         limit_insertion = true;
+                    }
                 }
                 else if (taken && !decision)
                 { // if this path is dominated by another path
@@ -728,7 +752,6 @@ void solver::enumerate(){
                     prune(source_node, taken_node);
                     continue;
                 }
-
                 //"good" node, add it to the ready_list, then reset problem state
                 path_node temp(problem_state.current_path, lower_bound, problem_state.origin_node, problem_state.history_key);
                 ready_list.push_back(temp);
@@ -777,9 +800,13 @@ void solver::enumerate(){
             {
                 // COMMENT: we are comparing the active_node(thread_id, last_node) with the request_buffer(thread_id, request_buffer)
                 // Don't we need other parameters such as depth, prefix_cost or  history_key
-                if (check_stop_request(thread_id, active_node.history_key))
+                bool prefix_key_matched = false;
+                if (check_stop_request(active_node.history_key, active_node.sequence, &prefix_key_matched))
                 {
-                    continue;
+                    if (prefix_key_matched)
+                        break;
+                    else
+                        continue;
                 }
             }
             if (enumeration_pre_check(active_node))
@@ -832,13 +859,13 @@ void solver::enumerate(){
             }
         }
         local_pools->pop_active_list(thread_id); // TODO: make sure with thread stopping that this is handled properly
-
         // if (stop_init && (int)problem_state.cur_solution.size() <= stop_depth) {
         //     stop_init = false;
         //     stop_depth = -1;
         //     last_node = -1;
         // }
 
+        // TODO_VIKAS: Shouldn't we pass true in the last parameter, since we the iteration is completed
         if (limit_insertion && history_table.get_current_size() < history_table.get_max_size())
         {
             push_to_history_table(problem_state.history_key, lb_liminsert, NULL, false);
@@ -1277,28 +1304,25 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
 
     int target_ID = history_node->active_threadID; // find whoever was working in this subspace
     int imp = content.prefix_cost - cost;
-    if (cost >= content.prefix_cost || imp <= content.lower_bound - best_cost)
+    if (cost >= content.prefix_cost)
         return false;
 
-    if (!history_node->explored)
+    if (!history_node->explored && target_ID != thread_id)
     { // TODO: thread stopping
         if (enable_threadstop && active_threads > 0)
         { // then issue thread stop request, since this path is superior
-            buffer_lock.lock();
-            if (request_buffer.empty() || request_buffer.front().target_thread != target_ID || request_buffer.front().target_depth > (int)problem_state.current_path.size())
+            if (!thread_requests[target_ID].has_request || thread_requests[target_ID].request.target_depth > (int)problem_state.current_path.size())
             {
-                // num_stop[thread_id].val++;
-                request_buffer.push_front({problem_state.current_path.back(), (int)problem_state.current_path.size(),
-                                           content.prefix_cost, target_ID, key.first});
-
-                // std::cout << "--" << key.first << std::endl;
-                if (!stop_sig)
+                thread_requests[target_ID].lock.lock();
+                if (!thread_requests[target_ID].has_request || thread_requests[target_ID].request.target_depth > (int)problem_state.current_path.size()) // extra validation
                 {
-                    stop_cnt = 0;
-                    stop_sig = true;
+                    thread_stop_requested++;
+                    thread_requests[target_ID].request = request_packet(problem_state.current_path.back(), (int)problem_state.current_path.size(),
+                                                                        content.prefix_cost, target_ID, key.first);
+                    thread_requests[target_ID].has_request = true;
                 }
+                thread_requests[target_ID].lock.unlock();
             }
-            buffer_lock.unlock();
         }
     }
 
@@ -1463,53 +1487,60 @@ void solver::print_state(sop_state &state)
         std::cout << state.depCnt[i] << " ";
     std::cout << std::endl;
 }
-bool solver::check_stop_request(int thread_id, pair<boost::dynamic_bitset<>, int> history_key_local_pool )
+
+bool solver::check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_key, vector<int> sequence, bool *prefixKeyMatched)
 {
-    buffer_lock.lock(); // Lock the buffer for safe access
-
-    // Check if the stop signal is true
-    if (!stop_sig.load())
+    if (thread_requests[thread_id].has_request)
     {
-        buffer_lock.unlock();
-        return false; // No stop request has been signaled
-    }
-
-    // Check if there are any requests in the buffer
-    if (request_buffer.empty())
-    {
-        buffer_lock.unlock();
-        return false; // No entry found for request buffer
-    }
-
-    for (auto it = request_buffer.begin(); it != request_buffer.end(); ++it)
-    {
-        // checking request_buffer target_thread with our current thread
-        if (it->target_thread == thread_id)
+        thread_requests[thread_id].lock.lock();
+        if (thread_requests[thread_id].has_request)
         {
-            // if it's not same, its not the desired path_node that we want to prune
-            if (it->target_last_node != history_key_local_pool.second)
-                continue;
-
-            // TODO_VIKAS: should we also check the size of thread_sequence with it->target_depth
-            
-            if (history_key_local_pool.first != it->key)
+            request_packet rp = thread_requests[thread_id].request;
+            if (rp.target_thread == thread_id)
             {
-                // keys are not equal which indicates that the target node is not there in the sequence
-                buffer_lock.unlock();
-                return false; // Indicate that a stop request was found but didn't fulfil the criteria
+                if (rp.target_depth <= sequence.size())
+                {
+                    if (rp.target_last_node == sequence[rp.target_depth - 1])
+                    {
+                        thread_stop_check++;
+                        if (rp.key == history_key.first) // will only occur when the size of the target_depth and sequence size is same
+                        {
+                            thread_stopped_successfully++;
+                            thread_requests[thread_id].has_request = false;
+                            thread_requests[thread_id].lock.unlock();
+                            return true; // Indicate that a stop request was found and handled
+                        }
+                        else if (rp.key == generate_history_key(sequence, rp.target_depth)) // will only occur when the size of the target_depth and sequence size is different
+                        {
+                            thread_stopped_successfully++;
+                            *prefixKeyMatched = true;
+                            thread_requests[thread_id].lock.unlock();
+                            return true; // Indicate that a stop request was found and handled
+                        }
+                    }
+                }
+                thread_requests[thread_id].has_request = false;
+                thread_requests[thread_id].lock.unlock();
+                return false; // Indicate that a stop request was found and handled
             }
-
-            // keys are equal
-            request_buffer.erase(it); // Remove the found request
-            if (request_buffer.empty())
-                stop_sig = false;
-            stop_cnt++;
-            buffer_lock.unlock();
-            return true; // Indicate that a stop request was found and handled
+            else
+            {
+                cout << "thread id mismatch \n";
+            }
+            thread_requests[thread_id].lock.unlock();
         }
     }
-    buffer_lock.unlock(); // releasing the lock
     return false;
+}
+
+boost::dynamic_bitset<> solver::generate_history_key(const vector<int> &sequence, int depth)
+{
+    boost::dynamic_bitset<> temp_history_key(instance_size);
+    for (int i = 0; i < depth; ++i)
+    {
+        temp_history_key.set(sequence[i]);
+    }
+    return temp_history_key;
 }
 
 /* END DIAGNOSTIC FUNCTIONS */

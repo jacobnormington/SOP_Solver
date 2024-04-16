@@ -42,6 +42,18 @@ struct request_packet
     int target_prefix_cost;
     int target_thread;
     boost::dynamic_bitset<> key;
+    request_packet() : target_last_node(0), target_depth(0), target_prefix_cost(0), target_thread(0), key() {}
+    // Constructor matching the provided argument list
+    request_packet(int last_node, int depth, int prefix_cost, int thread, const boost::dynamic_bitset<> &key_bitset)
+        : target_last_node(last_node), target_depth(depth), target_prefix_cost(prefix_cost), target_thread(thread), key(key_bitset) {}
+};
+
+struct thread_request
+{
+    request_packet request;
+    bool has_request; // Add a flag to indicate if a request is present
+    std::mutex lock;
+    thread_request() : request(), has_request(false) {}
 };
 
 /* All the information necessary about the current node in the enumeration tree.
@@ -175,7 +187,10 @@ private:
     void print_state(sop_state &state);
 
     // For checking, if any thread requested another thread to stop
-    bool check_stop_request(int thread_id, std::pair<boost::dynamic_bitset<>, int> key);
+    bool check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_key, std::vector<int> sequence, bool *prefixPathMatched);
+
+    // for generating history_key
+    boost::dynamic_bitset<> generate_history_key(const vector<int> &sequence, int depth);
 
 public:
     /* Takes config information and defines all runtime parameters from those strings. */
