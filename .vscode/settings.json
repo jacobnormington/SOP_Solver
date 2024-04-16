@@ -75,6 +75,7 @@
         "valarray": "cpp",
         "variant": "cpp",
         "bit": "cpp",
-        "charconv": "cpp"
+        "charconv": "cpp",
+        "queue": "cpp"
     }
 }

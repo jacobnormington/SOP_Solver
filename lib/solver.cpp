@@ -87,6 +87,9 @@ extern "C" {
     // static atomic<bool> resume_success (true);
     // static atomic<bool> resume_check (false);
     // static atomic<bool> exploit_init (false);
+    static mutex diagnostics_lock;
+    static int diagonstics_period = 10;
+    static float diagonstics_targetTime = 0;
 /////////////////////////////////////////
 
 
@@ -123,7 +126,11 @@ extern "C" {
 
 ///////////Diagnostic Variables//////////
     static vector<unsigned long long> enumerated_nodes;             //total number of nodes processed by each thread
-
+    static atomic<int> times_work_stolen;
+    static atomic<int> steal_misses;
+    static vector<atomic<int>> steal_attempts = vector<atomic<int>>(32);
+    static vector<atomic<int>> steal_success = vector<atomic<int>>(32);
+    static atomic<double> time_workstealing;
     //static vector<unsigned long long> estimated_trimmed_percent;  //estimated percentage of entire tree pruned or fully enumerated in each thread, stored as an integer out of ULLONG_MAX
     //TODO: change estimated_trimmed_percent to use unsigned_long_64 (and ULONG_MAX) instead of unsigned long long (and ULLONG_MAX)
     //static vector<int_64> num_resume;
@@ -155,6 +162,26 @@ void lkh() {
          //TODO: add entries to the history table corresponding to the LKH solution
     }
     return;
+}
+
+void print_diagnostics(){
+    if(main_timer.get_time_seconds() > diagonstics_targetTime){
+        diagnostics_lock.lock();
+        if(main_timer.get_time_seconds() <= diagonstics_targetTime){
+            diagnostics_lock.unlock();
+            return;
+        }
+        cout << main_timer.get_time_seconds() << endl;
+        local_pools->print();
+        // for(int i = 0; i < (int)work_remaining.size();i++){
+        //     cout << i <<": " << work_remaining[i] << ", ";
+        // }
+        cout <<endl;
+        cout << active_threads << endl;
+
+        diagonstics_targetTime = main_timer.get_time_seconds() + diagonstics_period;
+        diagnostics_lock.unlock();
+    }
 }
 /* ---------------------       END        -------------------------*/
 /* --------------------- Static Functions -------------------------*/
@@ -289,8 +316,21 @@ void solver::solve(string f_name, int thread_num) {
 
     auto total_time = chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     std::cout << "------------------------" << thread_total << " thread" << "------------------------------" << std::endl;
-    std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl << std::endl;
-    
+    std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) <<std::endl ;
+
+
+    // for(int i = 0; i < 32; i++){
+    //     cout << steal_attempts[i] << ", ";
+    // }
+    // cout << endl;
+    // for(int i = 0; i < 31; i++){
+    //     cout << steal_success[i] << ", ";
+    // }
+    // cout << endl;
+    // cout << endl;
+    // cout << endl;
+    // cout << endl;
+    // cout << time_workstealing <<", "<< steal_misses <<", " << times_work_stolen <<endl;
     ///// BEGIN DIAGNOSTICS /////
 
     //int total_cost = 0;
@@ -548,8 +588,17 @@ void solver::solve_parallel() {
 }
 
 void solver::enumerate(){
-
+    
     while(!time_out){
+        // if(thread_id == 0){
+        //     // for(int i = 0; i < 31; i++){
+        //     //     cout << local_pools->depths[i] << ", ";
+        //     // }
+        //     // cout << endl;
+        //     // cout << main_timer.get_time_seconds() << "| ";
+        //     // local_pools->print();
+        // }
+
         //PROGRESS variables
         int ready_node_count = 0;
         int pruned_count = 0;     
@@ -697,6 +746,8 @@ void solver::enumerate(){
             problem_state.current_cost -= cost_graph[src][taken_node].weight;
             problem_state.taken_arr[taken_node] = false;
             problem_state.current_path.pop_back();
+
+            //print_diagnostics();
 
             if (thread_id == 0){ //check if out of time
                 if (main_timer.get_time_seconds() > t_limit){
@@ -1122,10 +1173,11 @@ void solver::push_to_history_table(Key& key,int lower_bound,HistoryNode** entry,
     return;
 }
 
-
+mutex hmm;
 /* BEGIN WORK STEALING*/
 //WORKSTEALING
 bool solver::workload_request(){
+    local_pools->set_pool_depth(thread_id, INT32_MAX);
     if(!global_pool.empty()){
 
         global_pool_lock.lock();
@@ -1133,6 +1185,8 @@ bool solver::workload_request(){
             problem_state = generate_solver_state(global_pool.back());
             local_pools->set_pool_depth(thread_id, 0);
             global_pool.pop_back();
+            if(global_pool.empty())
+                cout << "GLOBAL POOL EMPTY" << endl;
             global_pool_lock.unlock();
             return true;
         }
@@ -1140,20 +1194,32 @@ bool solver::workload_request(){
     }
     //cout << "attempting to steal work " << ((int) active_threads) <<endl;
    // if (enable_workstealing) {
+    timer t;
     path_node new_node;
     active_threads--;
+    int misses = 0;
     while(true){
         if(active_threads <= 0)  
             return false;
         int target = local_pools->choose_victim(thread_id, work_remaining);
-        if(target == -1) continue;
+        if(target == -1) {
+            misses++;
+            continue;
+        }
+        steal_attempts[target]++;
         if(local_pools->pop_from_zero_list(target, new_node, thread_id)){
             work_remaining[target] = work_remaining[target] - new_node.current_node_value;
             problem_state = generate_solver_state(new_node);
             problem_state.work_above = new_node.current_node_value;
             active_threads++; 
+            times_work_stolen++;
+            steal_success[target]++;
+            time_workstealing = time_workstealing + t.get_time_seconds();
+            //cout << local_pools->depths[target] <<endl;
+            steal_misses += misses; 
             return true;
         }
+        misses++;
     }
         
    // }

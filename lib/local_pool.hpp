@@ -2,7 +2,8 @@
     #define LOCAL_H
 
     #include <deque> //for the local pool structure
-
+    #include <queue>
+    #include <iostream>
     #include "synchronization.hpp"
     #include "graph.hpp"
 
@@ -15,19 +16,30 @@
         private:
             std::vector<spin_lock> locks;
             std::vector<std::deque<std::deque<path_node>>> pools;
-            std::vector<int> depths;
             
             //workstealing variables
             int thread_count;
             int current_target = 0;
             spin_lock workstealing_lock;
+            spin_lock queue_lock;
+            
+
+            struct my_comparator
+            {
+                // queue elements are vectors so we need to compare those
+                bool operator()(std::vector<int> const& a, std::vector<int> const& b) const
+                {
+                    return a[1] > b[1];
+                }   
+            };
+
+            std::priority_queue<std::vector<int>, std::vector<std::vector<int>>, my_comparator> depth_queue;
+
+
         public:
-            local_pool(int thread_count){
-                locks = std::vector<spin_lock>(thread_count);
-                pools = std::vector<std::deque<std::deque<path_node>>>(thread_count);
-                depths = std::vector<int>(thread_count);
-                this->thread_count = thread_count;
-            }
+        std::vector<int> depths;
+            local_pool(int thread_count);
+            void add_to_depth_queue(int thread);
             /*Grabs a node from the shallowest / zero pool*/
             bool pop_from_zero_list(int thread_number, path_node &result_node, int stealing_thread);
             /*Grabs a node from the deepest / active pool*/
@@ -46,6 +58,8 @@
             void set_pool_depth(int thread, int depth);
 
             int active_pool_size(int thread_number); //diagnostic
+
+            void print();
     };
 
 #endif
