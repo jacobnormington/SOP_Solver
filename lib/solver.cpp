@@ -88,12 +88,14 @@ static atomic<int> active_threads(0); // the number of threads still working
 static deque<request_packet> request_buffer; //
 static mutex buffer_lock;                    // lock for accessing the request_buffer
 // static vector<thread_request> thread_requests;
-static vector<std::unique_ptr<thread_request>> thread_requests;
+static vector<thread_request> thread_requests(32);
 
 // static mutex pause_lock;                       //
 // static mutex ptselct_lock;                     //
-static atomic<bool> stop_sig(false); // if any threads are currently being requested to stop
-static atomic<int> stop_cnt(0);      // how many threads should stop
+static atomic<bool> stop_sig(false);               // if any threads are currently being requested to stop
+static atomic<int> thread_stop_requested(0);
+static atomic<int> thread_stop_check(0);
+static atomic<int> thread_stopped_successfully(0); // how many threads should stop
 /////////////////////////////////////////
 
 ///////////Work Stealing Variables///////
@@ -257,11 +259,11 @@ void solver::solve(string f_name, int thread_num)
     // thread_load = new load_stats [thread_total];
     local_pools = new local_pool(thread_total);
     history_table.initialize(thread_total);
-    thread_requests.resize(thread_total);
-    for (int i = 0; i < thread_total; ++i)
-    {
-        thread_requests[i] = std::make_unique<thread_request>();
-    }
+    // thread_requests.resize(thread_total);
+    // for (int i = 0; i < thread_total; ++i)
+    // {
+    //     thread_requests[i] = std::make_unique<thread_request>();
+    // }
 
     // abandon_wlk_array = vector<bool_64>(thread_total);
     // num_resume = vector<int_64>(thread_total);
@@ -304,8 +306,19 @@ void solver::solve(string f_name, int thread_num)
     auto total_time = chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     std::cout << "------------------------" << thread_total << " thread"
               << "------------------------------" << std::endl;
+    cout << "thread stop requested: " << thread_stop_requested << "\n";
+    cout << "thread stop check: " << thread_stop_check << "\n";
+    cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
+
     std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
               << std::endl;
+
+    // std::cout << "Best solution path: ";
+    // for (int element : best_solution)
+    // {
+    //     std::cout << element << ", ";
+    // }
+    // std::cout << std::endl;
 
     ///// BEGIN DIAGNOSTICS /////
 
@@ -750,9 +763,13 @@ void solver::enumerate()
             {
                 // COMMENT: we are comparing the active_node(thread_id, last_node) with the request_buffer(thread_id, request_buffer)
                 // Don't we need other parameters such as depth, prefix_cost or  history_key
-                if (check_stop_request(thread_id, active_node.history_key, active_node.sequence))
+                bool prefix_key_matched = false;
+                if (check_stop_request(active_node.history_key, active_node.sequence, &prefix_key_matched))
                 {
-                    continue;
+                    if (prefix_key_matched)
+                        break;
+                    else
+                        continue;
                 }
             }
             if (enumeration_pre_check(active_node))
@@ -810,6 +827,7 @@ void solver::enumerate()
         //     last_node = -1;
         // }
 
+        // TODO_VIKAS: Shouldn't we pass true in the last parameter, since we the iteration is completed
         if (limit_insertion && history_table.get_current_size() < history_table.get_max_size())
         {
             push_to_history_table(problem_state.history_key, lb_liminsert, NULL, false);
@@ -1248,21 +1266,24 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
 
     int target_ID = history_node->active_threadID; // find whoever was working in this subspace
     int imp = content.prefix_cost - cost;
-    if (cost >= content.prefix_cost || imp <= content.lower_bound - best_cost)
+    if (cost >= content.prefix_cost)
         return false;
 
-    if (!history_node->explored)
+    if (!history_node->explored && target_ID != thread_id)
     { // TODO: thread stopping
         if (enable_threadstop && active_threads > 0)
         { // then issue thread stop request, since this path is superior
-            if (!thread_requests.at(thread_id)->has_request)
+            if (!thread_requests[target_ID].has_request || thread_requests[target_ID].request.target_depth > (int)problem_state.current_path.size())
             {
-                thread_requests.at(thread_id)->lock.lock();
-                request_packet temp_request_packet{problem_state.current_path.back(), (int)problem_state.current_path.size(),
-                                                   content.prefix_cost, target_ID, key.first};
-                thread_requests.at(thread_id)->request = *(&temp_request_packet);
-                thread_requests.at(thread_id)->has_request = true;
-                thread_requests.at(thread_id)->lock.unlock();
+                thread_requests[target_ID].lock.lock();
+                if (!thread_requests[target_ID].has_request || thread_requests[target_ID].request.target_depth > (int)problem_state.current_path.size()) // extra validation
+                {
+                    thread_stop_requested++;
+                    thread_requests[target_ID].request = request_packet(problem_state.current_path.back(), (int)problem_state.current_path.size(),
+                                                                        content.prefix_cost, target_ID, key.first);
+                    thread_requests[target_ID].has_request = true;
+                }
+                thread_requests[target_ID].lock.unlock();
             }
         }
     }
@@ -1414,39 +1435,48 @@ void solver::print_state(sop_state &state)
     std::cout << std::endl;
 }
 
-bool solver::check_stop_request(int thread_id, std::pair<boost::dynamic_bitset<>, int> &history_key, vector<int> &sequence)
+bool solver::check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_key, vector<int> sequence, bool *prefixKeyMatched)
 {
-    thread_requests.at(thread_id)->lock.lock();
-    if (thread_requests.at(thread_id)->has_request)
+    if (thread_requests[thread_id].has_request)
     {
-        request_packet rp = thread_requests.at(thread_id)->request;
-        if (rp.target_depth <= sequence.size())
+        thread_requests[thread_id].lock.lock();
+        if (thread_requests[thread_id].has_request)
         {
-            if (rp.target_last_node == sequence[rp.target_depth - 1])
+            request_packet rp = thread_requests[thread_id].request;
+            if (rp.target_thread == thread_id)
             {
-                if ((rp.target_depth == sequence.size() && rp.key == history_key.first))
+                if (rp.target_depth <= sequence.size())
                 {
-                    thread_requests.at(thread_id)->has_request = false;
-                    stop_cnt++;
-                    thread_requests.at(thread_id)->lock.unlock();
-                    return true; // Indicate that a stop request was found and handled
+                    if (rp.target_last_node == sequence[rp.target_depth - 1])
+                    {
+                        thread_stop_check++;
+                        if (rp.key == history_key.first) // will only occur when the size of the target_depth and sequence size is same
+                        {
+                            thread_stopped_successfully++;
+                            thread_requests[thread_id].has_request = false;
+                            thread_requests[thread_id].lock.unlock();
+                            return true; // Indicate that a stop request was found and handled
+                        }
+                        else if (rp.key == generate_history_key(sequence, rp.target_depth)) // will only occur when the size of the target_depth and sequence size is different
+                        {
+                            thread_stopped_successfully++;
+                            *prefixKeyMatched = true;
+                            thread_requests[thread_id].lock.unlock();
+                            return true; // Indicate that a stop request was found and handled
+                        }
+                    }
                 }
-                else if (rp.target_depth != sequence.size() && rp.key == generate_history_key(sequence, rp.target_depth))
-                {
-                    stop_cnt++;
-                    thread_requests.at(thread_id)->lock.unlock();
-                    return true; // Indicate that a stop request was found and handled
-                }
-                // else
-                // {
-                //     thread_requests.at(thread_id)->has_request = false;
-                //     thread_requests.at(thread_id)->lock.unlock();
-                //     return false; // Indicate that a stop request was found and handled
-                // }
+                thread_requests[thread_id].has_request = false;
+                thread_requests[thread_id].lock.unlock();
+                return false; // Indicate that a stop request was found and handled
             }
+            else
+            {
+                cout << "thread id mismatch \n";
+            }
+            thread_requests[thread_id].lock.unlock();
         }
     }
-    thread_requests.at(thread_id)->lock.unlock();
     return false;
 }
 
