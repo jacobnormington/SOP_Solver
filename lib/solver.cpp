@@ -21,7 +21,7 @@ static float inhis_mem_limit = -1; // 0-1, the percentage of memory usage beyond
 // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
 // group_sample_time                            //period on which to schedule thread restart
 // static int tgroup_ratio = 0;                 //
-// static bool enable_workstealing = false;
+static bool enable_workstealing = false;
 static bool enable_threadstop = false;
 static bool enable_lkh = true;
 // static bool enable_progress_estimation = false;
@@ -204,8 +204,8 @@ void solver::assign_parameter(vector<string> setting)
     // tgroup_ratio = atoi(setting[7].c_str());
     // std::cout << "Number of promising thread per exploitation group = " << tgroup_ratio << std::endl;
 
-    // if (!atoi(setting[8].c_str())) enable_workstealing = false;
-    // else enable_workstealing = true;
+    if (!atoi(setting[8].c_str())) enable_workstealing = false;
+    else enable_workstealing = true;
 
     if (!atoi(setting[9].c_str()))
         enable_threadstop = false;
@@ -1371,37 +1371,38 @@ bool solver::workload_request(){
     }
 
     //cout << "attempting to steal work " << ((int) active_threads) <<endl;
-   // if (enable_workstealing) {
-    timer t;
-    path_node new_node;
+   
     active_threads--;
-    int misses = 0;
-    while(true){
-        if(active_threads <= 0)  
-            return false;
-        int target = local_pools->choose_victim(thread_id, work_remaining);
-        if(target == -1) {
-            misses++;
-            continue;
-        }
-        steal_attempts[target]++;
-        if(local_pools->pop_from_zero_list(target, new_node, thread_id)){
-            work_remaining[target] = work_remaining[target] - new_node.current_node_value;
-            problem_state = generate_solver_state(new_node);
-            problem_state.work_above = new_node.current_node_value;
-            active_threads++; 
-            times_work_stolen++;
-            steal_success[target]++;
-            time_workstealing = time_workstealing + t.get_time_seconds();
-            //cout << local_pools->depths[target] <<endl;
-            steal_misses += misses; 
+    if(enable_workstealing){
+        timer t;
+        path_node new_node;
+        int misses = 0;
+        while(true){
+            if(active_threads <= 0)  
+                return false;
+            int target = local_pools->choose_victim(thread_id, work_remaining);
+            if(target == -1) {
+                misses++;
+                continue;
+            }
+            steal_attempts[target]++;
+            if(local_pools->pop_from_zero_list(target, new_node, thread_id)){
+                work_remaining[target] = work_remaining[target] - new_node.current_node_value;
+                problem_state = generate_solver_state(new_node);
+                problem_state.work_above = new_node.current_node_value;
+                active_threads++; 
+                times_work_stolen++;
+                steal_success[target]++;
+                time_workstealing = time_workstealing + t.get_time_seconds();
+                //cout << local_pools->depths[target] <<endl;
+                steal_misses += misses; 
 
-            return true;
-        }
-        misses++;
+                return true;
+            }
+            misses++;
+        }   
     }
 
-    // }
     return false;
 }
 
