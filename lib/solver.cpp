@@ -1312,9 +1312,9 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
     if (cost >= content.prefix_cost)
         return false;
 
-    if (!history_node->explored && target_ID != thread_id)
+    if (!history_node->explored)
     { // TODO: thread stopping
-        if (enable_threadstop && active_threads > 0)
+        if (enable_threadstop && active_threads > 0 && target_ID != thread_id)
         { // then issue thread stop request, since this path is superior
             if (!thread_requests[target_ID].has_request || thread_requests[target_ID].request.target_depth > (int)problem_state.current_path.size())
             {
@@ -1357,6 +1357,15 @@ void solver::push_to_history_table(Key &key, int lower_bound, HistoryNode **entr
 /* BEGIN WORK STEALING*/
 //WORKSTEALING
 bool solver::workload_request(){
+    if (thread_requests[thread_id].has_request)
+    {
+        thread_requests[thread_id].lock.lock();
+        if (thread_requests[thread_id].has_request)
+        {
+            thread_requests[thread_id].has_request = false;
+        }
+        thread_requests[thread_id].lock.unlock();
+    }
     if(work_remaining[thread_id] != 0) cout << "ERROR!!! thread " << thread_id << " at workstealing with " <<work_remaining[thread_id] << " work remaining" << endl;
     local_pools->set_pool_depth(thread_id, INT32_MAX);
     if(!global_pool.empty()){
@@ -1504,8 +1513,8 @@ bool solver::check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_
         if (thread_requests[thread_id].has_request)
         {
             request_packet rp = thread_requests[thread_id].request;
-            if (rp.target_thread == thread_id)
-            {
+            // if (rp.target_thread == thread_id)
+            // {
                 if (rp.target_depth <= sequence.size())
                 {
                     if (rp.target_last_node == sequence[rp.target_depth - 1])
@@ -1530,11 +1539,11 @@ bool solver::check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_
                 thread_requests[thread_id].has_request = false;
                 thread_requests[thread_id].lock.unlock();
                 return false; // Indicate that a stop request was found and handled
-            }
-            else
-            {
-                cout << "thread id mismatch \n";
-            }
+            // }
+            // else
+            // {
+            //     cout << "thread id mismatch \n";
+            // }
             thread_requests[thread_id].lock.unlock();
         }
     }
