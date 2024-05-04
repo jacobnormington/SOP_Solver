@@ -21,7 +21,7 @@ static float inhis_mem_limit = -1; // 0-1, the percentage of memory usage beyond
 // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
 // group_sample_time                            //period on which to schedule thread restart
 // static int tgroup_ratio = 0;                 //
-// static bool enable_workstealing = false;
+static bool enable_workstealing = false;
 static bool enable_threadstop = false;
 static bool enable_lkh = true;
 // static bool enable_progress_estimation = false;
@@ -127,6 +127,8 @@ pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;
     static vector<atomic<int>> steal_attempts = vector<atomic<int>>(32);
     static vector<atomic<int>> steal_success = vector<atomic<int>>(32);
     static atomic<double> time_workstealing;
+    static vector<double> steal_times;
+    static mutex steal_times_lock;
     //static vector<unsigned long long> estimated_trimmed_percent;  //estimated percentage of entire tree pruned or fully enumerated in each thread, stored as an integer out of ULLONG_MAX
     //TODO: change estimated_trimmed_percent to use unsigned_long_64 (and ULONG_MAX) instead of unsigned long long (and ULLONG_MAX)
     //static vector<int_64> num_resume;
@@ -171,9 +173,9 @@ void print_diagnostics(){
         }
         cout << main_timer.get_time_seconds() << endl;
         local_pools->print();
-        // for(int i = 0; i < (int)work_remaining.size();i++){
-        //     cout << i <<": " << work_remaining[i] << ", ";
-        // }
+        for(int i = 0; i < (int)work_remaining.size();i++){
+            cout << i <<": " << work_remaining[i] << ", ";
+        }
         cout <<endl;
         cout << active_threads << endl;
 
@@ -204,8 +206,8 @@ void solver::assign_parameter(vector<string> setting)
     // tgroup_ratio = atoi(setting[7].c_str());
     // std::cout << "Number of promising thread per exploitation group = " << tgroup_ratio << std::endl;
 
-    // if (!atoi(setting[8].c_str())) enable_workstealing = false;
-    // else enable_workstealing = true;
+    if (!atoi(setting[8].c_str())) enable_workstealing = false;
+    else enable_workstealing = true;
 
     if (!atoi(setting[9].c_str()))
         enable_threadstop = false;
@@ -235,6 +237,8 @@ void solver::solve(string f_name, int thread_num)
         thread_total = thread_num - 1;
     else
         thread_total = thread_num;
+    if(global_pool_size < thread_total)
+        global_pool_size = thread_total;
     filename = f_name;
     retrieve_input();
     transitive_redundancy();
@@ -338,8 +342,25 @@ void solver::solve(string f_name, int thread_num)
     cout << "thread stop check: " << thread_stop_check << "\n";
     cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
 
+    for(int i = 0; i < steal_success.size(); i++)
+        cout << steal_success[i] << ", ";
+    cout << endl;
+     for(int i = 0; i < steal_success.size(); i++)
+        cout << steal_attempts[i] << ", ";
+    cout << endl;
+    cout << "total work stolen: " << times_work_stolen << endl;
+    cout << "steal misses: " << steal_misses << endl;
+
+    double percent_time_active = (((double)total_time / 1000000) * 32 - time_workstealing) / ((double)total_time / 1000000 * 32);
+    cout << "active time: " << percent_time_active << endl;
+    
+
     std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
               << std::endl;
+    
+    for(int i = 0; i < steal_times.size(); i++){
+        cout << steal_times[i] << endl;
+    }
 
     // std::cout << "Best solution path: ";
     // for (int element : best_solution)
@@ -636,20 +657,8 @@ void solver::solve_parallel()
 }
 
 void solver::enumerate(){
-    
     while(!time_out){
-        // if(thread_id == 0){
-        //     // for(int i = 0; i < 31; i++){
-        //     //     cout << local_pools->depths[i] << ", ";
-        //     // }
-        //     // cout << endl;
-        //     // cout << main_timer.get_time_seconds() << "| ";
-        //     // local_pools->print();
-        // }
-
         //PROGRESS variables
-
-
         int ready_node_count = 0;
         int pruned_count = 0;
 
@@ -766,20 +775,12 @@ void solver::enumerate(){
         // COMMENT:ready_node_count : number of nodes in the ready list
         unsigned long long next_work_above = problem_state.work_above / ready_node_count;
         unsigned long long remainder = problem_state.work_above % ready_node_count;
-        work_remaining[thread_id] = work_remaining[thread_id] - next_work_above * pruned_count;
+        work_remaining[thread_id] -= next_work_above * pruned_count + remainder;
 
         // COMMENT: Assigning work remaining for each path_node object in ready list
         for (unsigned i = 0; i < ready_list.size(); i++)
         {
-            // COMMENT: what we are doing here?
-            if (i < remainder)
-            {
-                ready_list[i].current_node_value = next_work_above + 1;
-            }
-            else
-            {
-                ready_list[i].current_node_value = next_work_above;
-            }
+            ready_list[i].current_node_value = next_work_above;
         }
 
         // DIAGNOSTIC: enum_nodes
@@ -803,6 +804,7 @@ void solver::enumerate(){
                 bool prefix_key_matched = false;
                 if (check_stop_request(active_node.history_key, active_node.sequence, &prefix_key_matched))
                 {
+                     work_remaining[thread_id] -= active_node.current_node_value;
                     if (prefix_key_matched)
                         break;
                     else
@@ -857,6 +859,9 @@ void solver::enumerate(){
                     return;
                 }
             }
+        }
+        while (local_pools->pop_from_active_list(thread_id, active_node)){
+            work_remaining[thread_id] -= active_node.current_node_value;
         }
         local_pools->pop_active_list(thread_id); // TODO: make sure with thread stopping that this is handled properly
         // if (stop_init && (int)problem_state.cur_solution.size() <= stop_depth) {
@@ -1252,7 +1257,7 @@ bool solver::enumeration_pre_check(path_node &active_node)
         // if (enable_progress_estimation) //pruning due to enumeration-time backtracking
         //     estimated_trimmed_percent[thread_id] += active_node.current_node_value; //add the value of this node you are trimming
         // PROGRESS
-        work_remaining[thread_id] = work_remaining[thread_id] - active_node.current_node_value;
+        work_remaining[thread_id] -= active_node.current_node_value;
 
         // cur_active_tree.incre_children_cnt(Allocator);
         // if (active_node.his_entry != NULL && active_node.his_entry->active_threadID == thread_id) {
@@ -1348,14 +1353,13 @@ void solver::push_to_history_table(Key &key, int lower_bound, HistoryNode **entr
     return;
 }
 
-
+    static int stolen_from;
 /* BEGIN WORK STEALING*/
 //WORKSTEALING
 bool solver::workload_request(){
+    if(work_remaining[thread_id] != 0) cout << "ERROR!!! thread " << thread_id << " at workstealing with " <<work_remaining[thread_id] << " work remaining" << endl;
     local_pools->set_pool_depth(thread_id, INT32_MAX);
     if(!global_pool.empty()){
-
-
         global_pool_lock.lock();
         if (!global_pool.empty())
         {
@@ -1369,39 +1373,43 @@ bool solver::workload_request(){
         }
         global_pool_lock.unlock();
     }
-
-    //cout << "attempting to steal work " << ((int) active_threads) <<endl;
-   // if (enable_workstealing) {
-    timer t;
-    path_node new_node;
+    
     active_threads--;
-    int misses = 0;
-    while(true){
-        if(active_threads <= 0)  
-            return false;
-        int target = local_pools->choose_victim(thread_id, work_remaining);
-        if(target == -1) {
+    if(enable_workstealing){
+        timer t;
+        path_node new_node;
+        int misses = 0;
+        while(true){
+            if(active_threads <= 0){
+                time_workstealing = time_workstealing + t.get_time_seconds();
+                return false;
+            }
+            int target = local_pools->choose_victim(thread_id, work_remaining, stolen_from);
+            
+            if(target == -1) {
+                misses++;
+                stolen_from = 0;
+                continue;
+            }
+            steal_attempts[target]++;
+            if(local_pools->pop_from_zero_list(target, new_node, thread_id)){
+                work_remaining[target] -= new_node.current_node_value;
+                problem_state = generate_solver_state(new_node);
+                problem_state.work_above = new_node.current_node_value;
+                active_threads++; 
+                times_work_stolen++;
+                steal_success[thread_id]++;
+                time_workstealing = time_workstealing + t.get_time_seconds();
+                steal_misses += misses; 
+                // steal_times_lock.lock();
+                // steal_times.push_back(main_timer.get_time_seconds());
+                // steal_times_lock.unlock();
+                return true;
+            }
+            stolen_from = stolen_from | (1 << target); 
             misses++;
-            continue;
-        }
-        steal_attempts[target]++;
-        if(local_pools->pop_from_zero_list(target, new_node, thread_id)){
-            work_remaining[target] = work_remaining[target] - new_node.current_node_value;
-            problem_state = generate_solver_state(new_node);
-            problem_state.work_above = new_node.current_node_value;
-            active_threads++; 
-            times_work_stolen++;
-            steal_success[target]++;
-            time_workstealing = time_workstealing + t.get_time_seconds();
-            //cout << local_pools->depths[target] <<endl;
-            steal_misses += misses; 
-
-            return true;
-        }
-        misses++;
+        }   
     }
-
-    // }
     return false;
 }
 
