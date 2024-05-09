@@ -171,7 +171,7 @@ private:
     bool workload_request();
 
     /* Build an sop_state based off the information in a path_node. */
-    sop_state generate_solver_state(path_node &subproblem);
+    sop_state generate_solver_state(path_node &subproblem, bool fromGlobalPool);
     /* Build a hungarian solver state based upon the problem_state. Used in generate_solver_state. */
     // void regenerate_hungstate();
     // assign_workload???
