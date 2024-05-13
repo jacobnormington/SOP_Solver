@@ -1,5 +1,5 @@
 //Time limit for the input instance (in seconds)
-Time_Limit = 500
+Time_Limit = 3600
 
 //Size of the initial global workload pool
 Global_Pool_Size = 1
@@ -26,7 +26,7 @@ Group_Thread_Count = 4
 Enable = 0
 
 //Thread Stopping (1 for enable 0 for disable)
-Enable = 1
+Enable = 0
 
 //Run in parallel with LKH (1 for enable 0 for disable)
 Enable = 0
