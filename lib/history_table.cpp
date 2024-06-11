@@ -54,17 +54,26 @@ History_Table::History_Table(size_t size)
     // std::cout << "Max bucket size is " << max_size / 1000000 << " MB" << std::endl;
     // std::cout << "Total Available Memory In OS is " << info.totalram / 1000000 << " MB" << std::endl;
 
-    table_lock = vector<spin_lock>(size / COVER_AREA + 1);
-    map.resize(size);
-
     insert_count = 0;
 }
 
-void History_Table::initialize(int thread_num)
+void History_Table::initialize(int thread_num, size_t size, int number_of_groups, int group_size)
 {
-    for (int i = 0; i < thread_num; i++)
+    num_of_groups = number_of_groups;
+    groups_size = group_size;
+
+    table_lock.resize(number_of_groups);
+    map.resize(number_of_groups);
+    for (int i = 0; i < number_of_groups; i++)
     {
-        memory_allocators.push_back(Memory_Module());
+        table_lock[i] = vector<spin_lock>(size / COVER_AREA + 1);
+        map[i].resize(size);
+    }
+
+    memory_allocators.resize(number_of_groups);
+    for (int i = 0; i < number_of_groups; i++)
+    {
+        memory_allocators[i].resize(thread_num);
     }
 }
 
@@ -88,66 +97,15 @@ void History_Table::print_curmem()
     return;
 }
 
-// void History_Table::adjust_max_size(int node_count,int GPQ_size) {
-//     max_size -= (GPQ_size * (12*node_count + 2*node_count*node_count) * 4);
-// }
-
-/* void History_Table::analyze_table() {
-    vector<long long unsigned> total_entrynum = vector<long long unsigned>(max_depth,0);
-    vector<long long unsigned> total_uses = vector<long long unsigned>(max_depth,0);
-    vector<long long unsigned> maximum_uses = vector<long long unsigned>(max_depth,0);
-    vector<long long unsigned> minimum_uses = vector<long long unsigned>(max_depth,INT_MAX);
-
-    for (unsigned i = 0; i < size; i++) {
-        if (map[i] != NULL) {
-            auto iter = map[i]->begin();
-            while (iter != map[i]->end()) {
-                total_entrynum[iter->second->depth]++;
-                total_uses[iter->second->depth] += iter->second->usage_cnt;
-                if ((unsigned)iter->second->usage_cnt > maximum_uses[iter->second->depth]) maximum_uses[iter->second->depth] = (unsigned)iter->second->usage_cnt;
-                if ((unsigned)iter->second->usage_cnt < minimum_uses[iter->second->depth]) minimum_uses[iter->second->depth] = (unsigned)iter->second->usage_cnt;
-                ++iter;
-            }
-        }
-    }
-
-    int lv_delta = ceil(float(max_depth) / 5);
-    unsigned starting_lv = 0;
-    unsigned ending_lv = lv_delta;
-
-    long long unsigned x_entry = 0;
-    long long unsigned x_uses = 0;
-    long long unsigned x_maximum = 0;
-    long long unsigned x_minimum = 0;
-    for (unsigned i = 0; i < 5; i++) {
-        for (unsigned j = starting_lv; j < ending_lv; j++) {
-            x_entry += total_entrynum[j];
-            x_uses += total_uses[j];
-            if (maximum_uses[j] > x_maximum) x_maximum = maximum_uses[j];
-            if (minimum_uses[j] < x_minimum) x_minimum = minimum_uses[j];
-        }
-        cout << "---------------------" << i * 20 + 20 << "% [" << starting_lv << "->" << ending_lv <<"]-----------------------" << endl;
-        cout << "Total_Entry: [" << x_entry << "]" << endl;
-        cout << "Total_Uses: [" << x_uses << "]" << endl;
-        cout << "Uses Per Entry: [" << (double)x_uses/(double)x_entry << "]" << endl;
-        cout << "Maximum Uses: [" << x_maximum << "]" << endl;
-        cout << "Minimum Uses: [" << x_minimum << "]" << endl;
-        if (i == 4) cout << "------------------------------------------------" << endl;
-        starting_lv = ending_lv;
-        ending_lv = ending_lv + lv_delta;
-        if (ending_lv >= max_depth) ending_lv = max_depth;
-        x_entry = 0;
-        x_uses = 0;
-        x_maximum = 0;
-        x_minimum = 0;
-    }
-    return;
-}
-*/
-
 HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth)
 {
-    HistoryNode *node = memory_allocators[thread_id].retrieve_his_node();
+    int group_index;
+    if (depth <= num_of_groups * groups_size)
+        group_index = std::ceil(static_cast<double>(depth) / groups_size) - 1;
+    else
+        group_index = num_of_groups - 1;
+
+    HistoryNode *node = memory_allocators[group_index][thread_id].retrieve_his_node();
 
     if (thread_id == 0)
     {
@@ -171,54 +129,60 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
     // node->depth = depth;
     // node->usage_cnt = 0;
 
-    table_lock[bucket / COVER_AREA].lock();
-    if (map[bucket] == NULL)
+    table_lock[group_index][bucket / COVER_AREA].lock();
+    if (map[group_index][bucket] == NULL)
     {
-        map[bucket] = memory_allocators[thread_id].get_bucket();
-        map[bucket]->push_back(make_pair(key, node));
-        table_lock[bucket / COVER_AREA].unlock();
+        map[group_index][bucket] = memory_allocators[group_index][thread_id].get_bucket();
+        map[group_index][bucket]->push_back(make_pair(key, node));
+        table_lock[group_index][bucket / COVER_AREA].unlock();
         return node;
     }
 
-    map[bucket]->push_back(make_pair(key, node));
-    table_lock[bucket / COVER_AREA].unlock();
+    map[group_index][bucket]->push_back(make_pair(key, node));
+    table_lock[group_index][bucket / COVER_AREA].unlock();
     return node;
 }
 
-HistoryNode *History_Table::retrieve(Key &key)
+HistoryNode *History_Table::retrieve(Key &key, int depth)
 {
+    int group_index;
+    if (depth <= num_of_groups * groups_size)
+        group_index = std::ceil(static_cast<double>(depth) / groups_size) - 1;
+    else
+        group_index = num_of_groups - 1;
+
     size_t val = hash<boost::dynamic_bitset<>>{}(key.first);
     int bucket = (val + key.second) % num_buckets;
 
-    table_lock[bucket / COVER_AREA].lock();
-    if (map[bucket] == NULL)
+    table_lock[group_index][bucket / COVER_AREA].lock();
+    if (map[group_index][bucket] == NULL)
     {
-        table_lock[bucket / COVER_AREA].unlock();
+        table_lock[group_index][bucket / COVER_AREA].unlock();
         return NULL;
     }
-    else if (map[bucket]->size() == 1)
+    else if (map[group_index][bucket]->size() == 1)
     {
-        if (key.second == map[bucket]->begin()->first.second && key.first == map[bucket]->begin()->first.first)
+        if (key.second == map[group_index][bucket]->begin()->first.second && key.first == map[group_index][bucket]->begin()->first.first)
         {
-            table_lock[bucket / COVER_AREA].unlock();
-            return map[bucket]->begin()->second;
+            table_lock[group_index][bucket / COVER_AREA].unlock();
+            return map[group_index][bucket]->begin()->second;
         }
         else
         {
-            table_lock[bucket / COVER_AREA].unlock();
+            table_lock[group_index][bucket / COVER_AREA].unlock();
             return NULL;
         }
     }
 
-    for (auto iter = map[bucket]->begin(); iter != map[bucket]->end(); iter++)
+    for (auto iter = map[group_index][bucket]->begin(); iter != map[group_index][bucket]->end(); iter++)
     {
         if (key.second == iter->first.second && key.first == iter->first.first)
         {
-            table_lock[bucket / COVER_AREA].unlock();
+            table_lock[group_index][bucket / COVER_AREA].unlock();
             return iter->second;
         }
     }
-    table_lock[bucket / COVER_AREA].unlock();
+    table_lock[group_index][bucket / COVER_AREA].unlock();
 
     return NULL;
 }

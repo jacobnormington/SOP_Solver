@@ -49,15 +49,18 @@ public:
 class History_Table
 {
 private:
-    unsigned num_buckets = 0;                // the number of buckets the history table should be stored in
-    vector<Bucket *> map;                    // the collection of history nodes
-    vector<spin_lock> table_lock;            // a read-write lock for every X adjacent buckets, defined by COVER_AREA
-    vector<Memory_Module> memory_allocators; // a memory allocator for each thread, in order to reduce synchronization overhead
+    unsigned num_buckets = 0;                        // the number of buckets the history table should be stored in
+    vector<vector<Bucket *>> map;                    // the collection of history nodes
+    vector<vector<spin_lock>> table_lock;            // a read-write lock for every X adjacent buckets, defined by COVER_AREA
+    vector<vector<Memory_Module>> memory_allocators; // a memory allocator for each thread, in order to reduce synchronization overhead
 
     unsigned long total_ram = 0;        // the total amount of memory in the system, in bytes
     unsigned long max_size = 0;         // the maximum allowed size of the history table, in bytes
     atomic<unsigned long> current_size; // the current size of the history table, in bytes
     int insert_count;                   // a counter to ensure that, periodically, current_size is updated
+
+    int num_of_groups; // the number of groups in history table
+    int groups_size;   // the size of each depth group
 public:
     /* Create a new history table object.
         size - the number of buckets the history table should be stored in */
@@ -65,7 +68,7 @@ public:
     /* Initialize the history table memory module (in parallel solver sets up one for each thread).
         thread_count -  the number of threads alloted to B&B enumeration
         node_count - the number of nodes in the cost graph */
-    void initialize(int thread_count);
+    void initialize(int thread_count, size_t size, int number_of_groups, int group_size);
     /* Returns the max allowed size of the history table, in bytes. */
     size_t get_max_size();
     /* Returns the current size of the history table, in bytes. */
@@ -89,7 +92,7 @@ public:
     /* Find a history table entry based on a specific key.
         key - the history key corresponding to the partial path this entry represents
         Return- a pointer to the node found, if any */
-    HistoryNode *retrieve(Key &key);
+    HistoryNode *retrieve(Key &key, int depth);
 };
 
 #endif

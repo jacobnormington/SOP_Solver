@@ -17,6 +17,8 @@ static int t_limit = 0;          // time limit, in seconds
 static int global_pool_size = 0; // Minimum size of the global pool at before enumeration begins
 // static int local_depth = 0;                     //Minimum size to maintain in the local pool
 static float inhis_mem_limit = -1; // 0-1, the percentage of memory usage beyond which new entries shouldn't be added to the history table
+static int number_of_groups = 1;
+static int group_size = 50;
 // static unsigned int inhis_depth = -1;           //after inhis_mem_limit exceeded, will still add an entry if the current depth is less than inhis_depth
 // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
 // group_sample_time                            //period on which to schedule thread restart
@@ -46,38 +48,37 @@ static vector<path_node> global_pool;                     // a global pool of no
 static local_pool *local_pools;                           // each thread's local pool, with the internal tools to manage them, only ever take from the back
 static vector<atomic<unsigned long long>> work_remaining; // used for work stealing, hold an estimate of how much work is left for a thread to do
 
-
 ///////////Synchronization Variables/////
-    // pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;   //lock for any updates to best_solution and its cost
-    static mutex best_solution_lock;
-    static mutex global_pool_lock;                  //lock for getting nodes from the global pool
-    // static mutex Split_lock;
-    // static mutex asssign_mutex;
-    // static mutex thread_load_mutex;
-    // static condition_variable Idel;
-    // static condition_variable Thread_Stop_Check;
-    // static condition_variable Resume_State;
-    // static vector<int> selected_orgin;
-    // static mutex Select_Mutex;
-    // static mutex Select_SharedMutex;
-    // static mutex Resume_Lock;
-    // static mutex launch_lck;
+// pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;   //lock for any updates to best_solution and its cost
+static mutex best_solution_lock;
+static mutex global_pool_lock; // lock for getting nodes from the global pool
+// static mutex Split_lock;
+// static mutex asssign_mutex;
+// static mutex thread_load_mutex;
+// static condition_variable Idel;
+// static condition_variable Thread_Stop_Check;
+// static condition_variable Resume_State;
+// static vector<int> selected_orgin;
+// static mutex Select_Mutex;
+// static mutex Select_SharedMutex;
+// static mutex Resume_Lock;
+// static mutex launch_lck;
 
-    static atomic<bool> time_out (false);           //whether the instance has timed out
-    static atomic<int> active_threads (0);          //the number of threads still working
-    // static atomic<int> selected_thread (-1);
-    // static atomic<int> restart_cnt (0);
-    // static atomic<int> total_restarts (0);
-    // static atomic<unsigned> idle_counter (0);
-    // static atomic<size_t> resload_cnt (0);
-    // static atomic<bool> limit_insert (false);
-    // static atomic<bool> check_status_safe (true);
-    // static atomic<bool> resume_success (true);
-    // static atomic<bool> resume_check (false);
-    // static atomic<bool> exploit_init (false);
-    static mutex diagnostics_lock;
-    static int diagonstics_period = 10;
-    static float diagonstics_targetTime = 0;
+static atomic<bool> time_out(false);  // whether the instance has timed out
+static atomic<int> active_threads(0); // the number of threads still working
+// static atomic<int> selected_thread (-1);
+// static atomic<int> restart_cnt (0);
+// static atomic<int> total_restarts (0);
+// static atomic<unsigned> idle_counter (0);
+// static atomic<size_t> resload_cnt (0);
+// static atomic<bool> limit_insert (false);
+// static atomic<bool> check_status_safe (true);
+// static atomic<bool> resume_success (true);
+// static atomic<bool> resume_check (false);
+// static atomic<bool> exploit_init (false);
+static mutex diagnostics_lock;
+static int diagonstics_period = 10;
+static float diagonstics_targetTime = 0;
 
 static vector<int> best_solution; // the lowest cost solution found so far in any thread
 int best_cost = INT_MAX;          // the cost of best_solution, this is an extern (global) variable shared by LKH
@@ -96,7 +97,7 @@ static vector<thread_request> thread_requests(32);
 
 // static mutex pause_lock;                       //
 // static mutex ptselct_lock;                     //
-static atomic<bool> stop_sig(false);               // if any threads are currently being requested to stop
+static atomic<bool> stop_sig(false); // if any threads are currently being requested to stop
 static atomic<int> thread_stop_requested(0);
 static atomic<int> thread_stop_check(0);
 static atomic<int> thread_stopped_successfully(0); // how many threads should stop
@@ -121,21 +122,21 @@ pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;
 /////////////////////////////////////////
 
 ///////////Diagnostic Variables//////////
-    static vector<unsigned long long> enumerated_nodes;             //total number of nodes processed by each thread
-    static atomic<int> times_work_stolen;
-    static atomic<int> steal_misses;
-    static vector<atomic<int>> steal_attempts = vector<atomic<int>>(32);
-    static vector<atomic<int>> steal_success = vector<atomic<int>>(32);
-    static atomic<double> time_workstealing;
-    //static vector<unsigned long long> estimated_trimmed_percent;  //estimated percentage of entire tree pruned or fully enumerated in each thread, stored as an integer out of ULLONG_MAX
-    //TODO: change estimated_trimmed_percent to use unsigned_long_64 (and ULONG_MAX) instead of unsigned long long (and ULLONG_MAX)
-    //static vector<int_64> num_resume;
-    //static vector<int_64> num_stop;
-    //static vector<double> lp_time;
-    //static vector<double> steal_wait;
-    //static vector<vector<double>> proc_time;
-    //static vector<int> steal_cnt;
-    //something to track history entry usage
+static vector<unsigned long long> enumerated_nodes; // total number of nodes processed by each thread
+static atomic<int> times_work_stolen;
+static atomic<int> steal_misses;
+static vector<atomic<int>> steal_attempts = vector<atomic<int>>(32);
+static vector<atomic<int>> steal_success = vector<atomic<int>>(32);
+static atomic<double> time_workstealing;
+// static vector<unsigned long long> estimated_trimmed_percent;  //estimated percentage of entire tree pruned or fully enumerated in each thread, stored as an integer out of ULLONG_MAX
+// TODO: change estimated_trimmed_percent to use unsigned_long_64 (and ULONG_MAX) instead of unsigned long long (and ULLONG_MAX)
+// static vector<int_64> num_resume;
+// static vector<int_64> num_stop;
+// static vector<double> lp_time;
+// static vector<double> steal_wait;
+// static vector<vector<double>> proc_time;
+// static vector<int> steal_cnt;
+// something to track history entry usage
 /////////////////////////////////////////
 
 /* --------------------- Static Functions -------------------------*/
@@ -162,10 +163,13 @@ void lkh()
     return;
 }
 
-void print_diagnostics(){
-    if(main_timer.get_time_seconds() > diagonstics_targetTime){
+void print_diagnostics()
+{
+    if (main_timer.get_time_seconds() > diagonstics_targetTime)
+    {
         diagnostics_lock.lock();
-        if(main_timer.get_time_seconds() <= diagonstics_targetTime){
+        if (main_timer.get_time_seconds() <= diagonstics_targetTime)
+        {
             diagnostics_lock.unlock();
             return;
         }
@@ -174,7 +178,7 @@ void print_diagnostics(){
         // for(int i = 0; i < (int)work_remaining.size();i++){
         //     cout << i <<": " << work_remaining[i] << ", ";
         // }
-        cout <<endl;
+        cout << endl;
         cout << active_threads << endl;
 
         diagonstics_targetTime = main_timer.get_time_seconds() + diagonstics_period;
@@ -219,6 +223,11 @@ void solver::assign_parameter(vector<string> setting)
 
     // if (!atoi(setting[11].c_str())) enable_progress_estimation = false;
     // else enable_progress_estimation = true;
+    number_of_groups = atoi(setting[12].c_str());
+    std::cout << "Number of groups = " << number_of_groups << std::endl;
+
+    group_size = atoi(setting[13].c_str());
+    std::cout << "Group size = " << group_size << std::endl;
 
     return;
 }
@@ -286,7 +295,7 @@ void solver::solve(string f_name, int thread_num)
 
     // thread_load = new load_stats [thread_total];
     local_pools = new local_pool(thread_total);
-    history_table.initialize(thread_total);
+    history_table.initialize(thread_total, TABLE_SIZE, number_of_groups, group_size);
     // thread_requests.resize(thread_total);
     // for (int i = 0; i < thread_total; ++i)
     // {
@@ -635,9 +644,11 @@ void solver::solve_parallel()
     return;
 }
 
-void solver::enumerate(){
-    
-    while(!time_out){
+void solver::enumerate()
+{
+
+    while (!time_out)
+    {
         // if(thread_id == 0){
         //     // for(int i = 0; i < 31; i++){
         //     //     cout << local_pools->depths[i] << ", ";
@@ -647,8 +658,7 @@ void solver::enumerate(){
         //     // local_pools->print();
         // }
 
-        //PROGRESS variables
-
+        // PROGRESS variables
 
         int ready_node_count = 0;
         int pruned_count = 0;
@@ -846,7 +856,6 @@ void solver::enumerate(){
             problem_state.taken_arr[taken_node] = false;
             problem_state.current_path.pop_back();
 
-
             if (thread_id == 0)
             { // check if out of time
                 if (main_timer.get_time_seconds() > t_limit)
@@ -868,7 +877,7 @@ void solver::enumerate(){
         // TODO_VIKAS: Shouldn't we pass true in the last parameter, since we the iteration is completed
         if (limit_insertion && history_table.get_current_size() < history_table.get_max_size())
         {
-            push_to_history_table(problem_state.history_key, lb_liminsert, NULL, false);
+            push_to_history_table(problem_state.history_key, lb_liminsert, NULL, true);
         }
 
         // TODO: replace above with this, for taking depth into account
@@ -1292,7 +1301,7 @@ int solver::dynamic_hungarian(int src, int dst)
 
 bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *found, HistoryNode **entry)
 {
-    HistoryNode *history_node = history_table.retrieve(key);
+    HistoryNode *history_node = history_table.retrieve(key, problem_state.current_path.size());
 
     if (history_node == NULL)
         return true;
@@ -1348,13 +1357,13 @@ void solver::push_to_history_table(Key &key, int lower_bound, HistoryNode **entr
     return;
 }
 
-
 /* BEGIN WORK STEALING*/
-//WORKSTEALING
-bool solver::workload_request(){
+// WORKSTEALING
+bool solver::workload_request()
+{
     local_pools->set_pool_depth(thread_id, INT32_MAX);
-    if(!global_pool.empty()){
-
+    if (!global_pool.empty())
+    {
 
         global_pool_lock.lock();
         if (!global_pool.empty())
@@ -1362,7 +1371,7 @@ bool solver::workload_request(){
             problem_state = generate_solver_state(global_pool.back());
             local_pools->set_pool_depth(thread_id, 0);
             global_pool.pop_back();
-            if(global_pool.empty())
+            if (global_pool.empty())
                 cout << "GLOBAL POOL EMPTY" << endl;
             global_pool_lock.unlock();
             return true;
@@ -1370,17 +1379,19 @@ bool solver::workload_request(){
         global_pool_lock.unlock();
     }
 
-    //cout << "attempting to steal work " << ((int) active_threads) <<endl;
-   // if (enable_workstealing) {
+    // cout << "attempting to steal work " << ((int) active_threads) <<endl;
+    // if (enable_workstealing) {
     timer t;
     path_node new_node;
     active_threads--;
     int misses = 0;
-    while(true){
-        if(active_threads <= 0)  
+    while (true)
+    {
+        if (active_threads <= 0)
             return false;
         int target = local_pools->choose_victim(thread_id, work_remaining);
-        if(target == -1) {
+        if (target == -1)
+        {
             misses++;
             continue;
         }
@@ -1399,12 +1410,12 @@ bool solver::workload_request(){
             work_remaining[target] = work_remaining[target] - new_node.current_node_value;
             problem_state = generate_solver_state(new_node);
             problem_state.work_above = new_node.current_node_value;
-            active_threads++; 
+            active_threads++;
             times_work_stolen++;
             steal_success[target]++;
             time_workstealing = time_workstealing + t.get_time_seconds();
-            //cout << local_pools->depths[target] <<endl;
-            steal_misses += misses; 
+            // cout << local_pools->depths[target] <<endl;
+            steal_misses += misses;
 
             return true;
         }
