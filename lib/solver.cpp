@@ -17,6 +17,7 @@ static int t_limit = 0;          // time limit, in seconds
 static int global_pool_size = 0; // Minimum size of the global pool at before enumeration begins
 // static int local_depth = 0;                     //Minimum size to maintain in the local pool
 static float inhis_mem_limit = -1; // 0-1, the percentage of memory usage beyond which new entries shouldn't be added to the history table
+static float mem_limit = -1;       // 0-1, the percentage of memory usage beyond which we will start blocking new entries into the table
 static int number_of_groups = 1;
 static int group_size = 50;
 // static unsigned int inhis_depth = -1;           //after inhis_mem_limit exceeded, will still add an entry if the current depth is less than inhis_depth
@@ -198,6 +199,9 @@ void solver::assign_parameter(vector<string> setting)
 
     inhis_mem_limit = atof(setting[3].c_str());
     std::cout << "History table mem limit = " << inhis_mem_limit << std::endl;
+
+    mem_limit = inhis_mem_limit - 0.2;
+    std::cout << "Blocking mem limit = " << mem_limit << std::endl;
     // inhis_depth = atof(setting[4].c_str());
     // std::cout << "History table depth to always add = " << inhis_depth << std::endl;
 
@@ -734,12 +738,19 @@ void solver::enumerate()
                 { // if there is no similar entry in the history table
                     lower_bound = dynamic_hungarian(source_node, taken_node);
                     // TODO_VIKAS: can we check the lower bound with the best cost before inserting into the history table
-                    if (history_table.get_current_size() < inhis_mem_limit * history_table.get_max_size())
+                    if (history_table.get_current_size() < mem_limit * history_table.get_max_size())
                         push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
                     else
                     {
-                        // std::cout<<"limit insertion is true"<<std::endl;
-                        limit_insertion = true;
+                        // it will return true if that group where we supposed to insert is blocked
+                        if (!limit_insertion && !history_table.check_and_manage_memory(problem_state.current_path.size(), &mem_limit))
+                        {
+                            push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
+                        }
+                        if (mem_limit >= inhis_mem_limit)
+                        {
+                            limit_insertion = true;
+                        }
                     }
                 }
                 else if (taken && !decision)

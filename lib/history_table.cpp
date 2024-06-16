@@ -62,18 +62,21 @@ void History_Table::initialize(int thread_num, size_t size, int number_of_groups
     num_of_groups = number_of_groups;
     groups_size = group_size;
 
-    table_lock.resize(number_of_groups);
     map.resize(number_of_groups);
-    for (int i = 0; i < number_of_groups; i++)
-    {
-        table_lock[i] = vector<spin_lock>(size / COVER_AREA + 1);
-        map[i].resize(size);
-    }
-
     memory_allocators.resize(number_of_groups);
+
+    table_lock.resize(number_of_groups);
+    blocked_groups.resize(number_of_groups);
+
+    group_locks = vector<spin_lock>(number_of_groups);
+
     for (int i = 0; i < number_of_groups; i++)
     {
+        map[i].resize(size);
         memory_allocators[i].resize(thread_num);
+
+        table_lock[i] = vector<spin_lock>(size / COVER_AREA + 1);
+        blocked_groups[i] = false;
     }
 }
 
@@ -105,9 +108,12 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
     else
         group_index = num_of_groups - 1;
 
+    if (blocked_groups[group_index])
+        return NULL;
+
     HistoryNode *node = memory_allocators[group_index][thread_id].retrieve_his_node();
 
-    if (thread_id == 0)
+    if (thread_id == 1)
     {
         insert_count++;
         if (insert_count >= 100000)
@@ -130,6 +136,11 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
     // node->usage_cnt = 0;
 
     table_lock[group_index][bucket / COVER_AREA].lock();
+    if (blocked_groups[group_index])
+    {
+        table_lock[group_index][bucket / COVER_AREA].unlock();
+        return NULL;
+    }
     if (map[group_index][bucket] == NULL)
     {
         map[group_index][bucket] = memory_allocators[group_index][thread_id].get_bucket();
@@ -185,4 +196,52 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
     table_lock[group_index][bucket / COVER_AREA].unlock();
 
     return NULL;
+}
+
+bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit)
+{
+    int group_index;
+    if (depth <= num_of_groups * groups_size)
+        group_index = std::ceil(static_cast<double>(depth) / groups_size) - 1;
+    else
+        group_index = num_of_groups - 1;
+
+    for (int i = memory_allocators.size() - 1; i > 0; --i)
+    {
+        // cout << "attempted to block the group :" << group_index << "\n";
+        if (current_size < *updated_mem_limit * max_size)
+            return blocked_groups[group_index];
+
+        if (blocked_groups[i]) // to prevent using unnecessary locks
+            continue;
+
+        group_locks[i].lock();
+        if (current_size < *updated_mem_limit * max_size)
+        {
+            group_locks[i].unlock();
+            return blocked_groups[group_index];
+            // return group_index > i; // if the subtable number is lesser than i, we CAN insert that record by returning FALSE
+        }
+        if (blocked_groups[i]) // extra checks
+        {
+            group_locks[i].unlock();
+            continue;
+        }
+        if (!blocked_groups[i])
+        {
+
+            blocked_groups[i] = true;
+            *updated_mem_limit += 0.1f;
+            cout << "Blocking insertion in bucket: " << i + 1 << " when the mem limit is: " << *updated_mem_limit << std::endl;
+            for (int j = memory_allocators.size() - 1; j >= 0; --j)
+            {
+                cout << blocked_groups[j] << " ";
+            }
+            cout << "\n";
+            group_locks[i].unlock();
+            return group_index == i; // if the subtable number is equal to the blocking group, we CAN"T insert that record by returning TRUE
+        }
+        group_locks[i].unlock();
+    }
+    return true;
 }

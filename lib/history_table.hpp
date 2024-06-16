@@ -61,6 +61,9 @@ private:
 
     int num_of_groups; // the number of groups in history table
     int groups_size;   // the size of each depth group
+
+    vector<bool> blocked_groups;   // track which groups are blocked from insertions
+    vector<spin_lock> group_locks;
 public:
     /* Create a new history table object.
         size - the number of buckets the history table should be stored in */
@@ -93,6 +96,7 @@ public:
         key - the history key corresponding to the partial path this entry represents
         Return- a pointer to the node found, if any */
     HistoryNode *retrieve(Key &key, int depth);
+    bool check_and_manage_memory(int depth, float *updatedMemLimit);
 };
 
 #endif
