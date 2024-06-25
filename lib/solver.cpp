@@ -20,6 +20,7 @@ static float inhis_mem_limit = -1; // 0-1, the percentage of memory usage beyond
 static float mem_limit = -1;       // 0-1, the percentage of memory usage beyond which we will start blocking new entries into the table
 static int number_of_groups = 1;
 static int group_size = 50;
+static bool is_all_table_blocked = false;
 // static unsigned int inhis_depth = -1;           //after inhis_mem_limit exceeded, will still add an entry if the current depth is less than inhis_depth
 // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
 // group_sample_time                            //period on which to schedule thread restart
@@ -738,18 +739,25 @@ void solver::enumerate()
                 { // if there is no similar entry in the history table
                     lower_bound = dynamic_hungarian(source_node, taken_node);
                     // TODO_VIKAS: can we check the lower bound with the best cost before inserting into the history table
-                    if (history_table.get_current_size() < mem_limit * history_table.get_max_size())
-                        push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
-                    else
-                    {
-                        // it will return true if that group where we supposed to insert is blocked
-                        if (!limit_insertion && !history_table.check_and_manage_memory(problem_state.current_path.size(), &mem_limit))
-                        {
+
+                    if (!limit_insertion) {
+                        if (history_table.get_current_size() < mem_limit * history_table.get_max_size())
                             push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
-                        }
-                        if (mem_limit >= inhis_mem_limit)
-                        {
-                            limit_insertion = true;
+                        else {
+                            if (!is_all_table_blocked) {
+                                if (!history_table.check_and_manage_memory(problem_state.current_path.size(), &mem_limit, &is_all_table_blocked)) 
+                                    push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
+                            }
+                            else {
+                                if (history_table.get_current_size() >= mem_limit * history_table.get_max_size()) {
+                                    bool is_space_increased_or_available = history_table.free_subtable_memory(&mem_limit);
+                                    if (is_space_increased_or_available && problem_state.current_path.size() <= group_size) 
+                                        push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
+                                    else
+                                        limit_insertion = true;
+                                    
+                                }
+                            }
                         }
                     }
                 }

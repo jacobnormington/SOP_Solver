@@ -10,10 +10,16 @@ Memory_Module::Memory_Module()
     bucket_counter = 0;
     his_node_counter = 0;
 }
+Memory_Module::~Memory_Module()
+{
+    // cout << "destructor triggered\n";
+    delete[] bucket_block; // Use delete[] to free the array of Buckets
+    free(history_block);   // Use free to deallocate memory allocated with malloc
+}
 
 Bucket *Memory_Module::get_bucket()
 {
-    if (bucket_counter == BUCKET_BLK_SIZE || bucket_block == NULL)
+    if (bucket_counter >= BUCKET_BLK_SIZE || bucket_block == NULL)
     {
         bucket_block = new Bucket[BUCKET_BLK_SIZE];
         bucket_counter = 0;
@@ -61,12 +67,15 @@ void History_Table::initialize(int thread_num, size_t size, int number_of_groups
 {
     num_of_groups = number_of_groups;
     groups_size = group_size;
+    block_count.resize(number_of_groups, 0);
 
     map.resize(number_of_groups);
     memory_allocators.resize(number_of_groups);
 
     table_lock.resize(number_of_groups);
-    blocked_groups.resize(number_of_groups);
+
+    blocked_groups.resize(number_of_groups, false);
+    is_data_available.resize(number_of_groups, true);
 
     group_locks = vector<spin_lock>(number_of_groups);
 
@@ -76,7 +85,6 @@ void History_Table::initialize(int thread_num, size_t size, int number_of_groups
         memory_allocators[i].resize(thread_num);
 
         table_lock[i] = vector<spin_lock>(size / COVER_AREA + 1);
-        blocked_groups[i] = false;
     }
 }
 
@@ -108,8 +116,11 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
     else
         group_index = num_of_groups - 1;
 
-    if (blocked_groups[group_index])
+    if (!is_data_available[group_index] || blocked_groups[group_index])
+    {
+        block_count[group_index]++;
         return NULL;
+    }
 
     HistoryNode *node = memory_allocators[group_index][thread_id].retrieve_his_node();
 
@@ -136,8 +147,9 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
     // node->usage_cnt = 0;
 
     table_lock[group_index][bucket / COVER_AREA].lock();
-    if (blocked_groups[group_index])
+    if (!is_data_available[group_index] || blocked_groups[group_index])
     {
+        block_count[group_index]++;
         table_lock[group_index][bucket / COVER_AREA].unlock();
         return NULL;
     }
@@ -162,11 +174,14 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
     else
         group_index = num_of_groups - 1;
 
+    if (!is_data_available[group_index])
+        return NULL;
+
     size_t val = hash<boost::dynamic_bitset<>>{}(key.first);
     int bucket = (val + key.second) % num_buckets;
 
     table_lock[group_index][bucket / COVER_AREA].lock();
-    if (map[group_index][bucket] == NULL)
+    if (map[group_index][bucket] == NULL || !is_data_available[group_index])
     {
         table_lock[group_index][bucket / COVER_AREA].unlock();
         return NULL;
@@ -198,7 +213,7 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
     return NULL;
 }
 
-bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit)
+bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit, bool *is_all_table_blocked)
 {
     int group_index;
     if (depth <= num_of_groups * groups_size)
@@ -222,26 +237,73 @@ bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit)
             return blocked_groups[group_index];
             // return group_index > i; // if the subtable number is lesser than i, we CAN insert that record by returning FALSE
         }
-        if (blocked_groups[i]) // extra checks
-        {
-            group_locks[i].unlock();
-            continue;
-        }
         if (!blocked_groups[i])
         {
-
-            blocked_groups[i] = true;
-            *updated_mem_limit += 0.1f;
             cout << "Blocking insertion in bucket: " << i + 1 << " when the mem limit is: " << *updated_mem_limit << std::endl;
+            blocked_groups[i] = true;
+            *is_all_table_blocked = (i == 1);
+            *updated_mem_limit += 0.1f;
+            cout << "Updated memory limit: " << *updated_mem_limit << std::endl;
+
             for (int j = memory_allocators.size() - 1; j >= 0; --j)
             {
                 cout << blocked_groups[j] << " ";
             }
             cout << "\n";
             group_locks[i].unlock();
-            return group_index == i; // if the subtable number is equal to the blocking group, we CAN"T insert that record by returning TRUE
+            return blocked_groups[i]; // if the subtable number is equal to the blocking group, we CAN"T insert that record by returning TRUE
         }
         group_locks[i].unlock();
     }
-    return true;
+    return blocked_groups[group_index];
+    ;
+}
+
+bool History_Table::free_subtable_memory(float *mem_limit)
+{
+    for (int i = memory_allocators.size() - 1; i > 0; --i)
+    {
+        if (current_size < *mem_limit * max_size)
+            return true;
+
+        if (blocked_groups[i] && is_data_available[i]) // Ensure the group is blocked and data is there
+        {
+            // cout << "locking the group\n";
+            group_locks[i].lock();
+            if (current_size < *mem_limit * max_size)
+            {
+                group_locks[i].unlock();
+                return true;
+            }
+
+            // // Free the memory if group entry is blocked and data is available
+            if (blocked_groups[i] && is_data_available[i])
+            {
+                cout << "starting the deallocation of memory\n";
+                current_size = total_ram - get_free_mem();
+                std::cout << "current used size before (in bytes): " << current_size << std::endl;
+                std::cout << "size of subtable " << i + 1 << " (in bytes): " << sizeof(memory_allocators[i]) << std::endl;
+
+                for (auto &allocator : memory_allocators[i])
+                {
+                }
+                memory_allocators[i].clear(); // Clear the vector, effectively freeing memory
+                is_data_available[i] = false;
+
+                std::cout << "Freed memory for subtable: " << i + 1 << std::endl;
+
+                current_size = total_ram - get_free_mem();
+                std::cout << "current used size after freeing space (in bytes): " << current_size << std::endl;
+                for (int k = 0; k < 3; k++)
+                {
+                    cout << block_count[k] << " ";
+                }
+                cout << "\n";
+                group_locks[i].unlock();
+                return true;
+            }
+            group_locks[i].unlock();
+        }
+    }
+    return false;
 }

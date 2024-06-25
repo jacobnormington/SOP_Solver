@@ -33,6 +33,7 @@ private:
     // unsigned max_level = 0;
 public:
     Memory_Module();
+    ~Memory_Module(); // Destructor declaration
     Bucket *get_bucket();
     HistoryNode *retrieve_his_node();
     // unsigned long request_nodeMem();
@@ -63,7 +64,10 @@ private:
     int groups_size;   // the size of each depth group
 
     vector<bool> blocked_groups;   // track which groups are blocked from insertions
+    vector<bool> is_data_available; // tracks whether data is available in each subtable
     vector<spin_lock> group_locks;
+
+    vector<long> block_count;
 public:
     /* Create a new history table object.
         size - the number of buckets the history table should be stored in */
@@ -96,7 +100,8 @@ public:
         key - the history key corresponding to the partial path this entry represents
         Return- a pointer to the node found, if any */
     HistoryNode *retrieve(Key &key, int depth);
-    bool check_and_manage_memory(int depth, float *updatedMemLimit);
+    bool check_and_manage_memory(int depth, float *updatedMemLimit, bool *is_all_table_blocked);
+    bool free_subtable_memory(float *mem_limit);
 };
 
 #endif
