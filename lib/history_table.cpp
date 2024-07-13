@@ -181,7 +181,7 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
     int bucket = (val + key.second) % num_buckets;
 
     table_lock[group_index][bucket / COVER_AREA].lock();
-    if (map[group_index][bucket] == NULL || !is_data_available[group_index])
+    if (!is_data_available[group_index] || map[group_index][bucket] == NULL)
     {
         table_lock[group_index][bucket / COVER_AREA].unlock();
         return NULL;
@@ -199,15 +199,15 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
             return NULL;
         }
     }
-
-    for (auto iter = map[group_index][bucket]->begin(); iter != map[group_index][bucket]->end(); iter++)
-    {
-        if (key.second == iter->first.second && key.first == iter->first.first)
+    if (is_data_available[group_index])
+        for (auto iter = map[group_index][bucket]->begin(); iter != map[group_index][bucket]->end(); iter++)
         {
-            table_lock[group_index][bucket / COVER_AREA].unlock();
-            return iter->second;
+            if (key.second == iter->first.second && key.first == iter->first.first)
+            {
+                table_lock[group_index][bucket / COVER_AREA].unlock();
+                return iter->second;
+            }
         }
-    }
     table_lock[group_index][bucket / COVER_AREA].unlock();
 
     return NULL;
@@ -279,6 +279,7 @@ bool History_Table::free_subtable_memory(float *mem_limit)
             // // Free the memory if group entry is blocked and data is available
             if (blocked_groups[i] && is_data_available[i])
             {
+                is_data_available[i] = false;
                 cout << "starting the deallocation of memory\n";
                 current_size = total_ram - get_free_mem();
                 std::cout << "current used size before (in bytes): " << current_size << std::endl;
@@ -288,7 +289,6 @@ bool History_Table::free_subtable_memory(float *mem_limit)
                 {
                 }
                 memory_allocators[i].clear(); // Clear the vector, effectively freeing memory
-                is_data_available[i] = false;
 
                 std::cout << "Freed memory for subtable: " << i + 1 << std::endl;
 

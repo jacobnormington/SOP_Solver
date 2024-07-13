@@ -23,7 +23,7 @@ Cycle_Time = 3600
 Group_Thread_Count = 4
 
 //Work Stealing (1 for enable 0 for disable)
-Enable = 0
+Enable = 1
 
 //Thread Stopping (1 for enable 0 for disable)
 Enable = 1
@@ -38,4 +38,4 @@ Enable = 1
 Number_of_Buckets = 3
 
 //Each bucket size for history table
-Bucket_size = 50
+Bucket_size = 130
