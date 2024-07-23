@@ -24,6 +24,7 @@
             bool pop_from_zero_list(int thread_number, path_node &result_node, int stealing_thread);
             /*Grabs a node from the deepest / active pool*/
             bool pop_from_active_list(int thread_number, path_node &result_node);
+            bool peek_from_active_list(int thread_number, path_node &result_node);
             /*Pushes new list to the back of the local pool*/
             void push_list(int thread_number, std::deque<path_node> list);
             /*removes */

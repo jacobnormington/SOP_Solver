@@ -55,6 +55,22 @@
         return true;
     };
 
+    bool local_pool::peek_from_active_list(int thread_number, path_node &result_node){
+
+        if (pools[thread_number].size() == 0)
+            return false;
+
+        if (pools[thread_number].size() == 0 || pools[thread_number].back().empty()){
+            if (pools[thread_number].size() == 1){
+                locks[thread_number].unlock();
+            }
+            return false;
+        }
+
+        result_node = pools[thread_number].back().back();
+        return true;
+    };
+
     void local_pool::push_list(int thread_number, std::deque<path_node> list){
         locks[thread_number].lock();
 

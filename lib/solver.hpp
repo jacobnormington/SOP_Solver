@@ -52,8 +52,9 @@ struct thread_request
 {
     request_packet request;
     bool has_request; // Add a flag to indicate if a request is present
+    bool pre_check;
     std::mutex lock;
-    thread_request() : request(), has_request(false) {}
+    thread_request() : request(), has_request(false), pre_check(false) {}
 };
 
 /* All the information necessary about the current node in the enumeration tree.

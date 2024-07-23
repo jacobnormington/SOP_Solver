@@ -3,7 +3,7 @@
 #if startInstance is set, it will add to the existing log files, picking up from a previous pause
 startInstance=""					# the first instance to process, skipping any lexicographically earlier; if empty, begins at the first instance
 endInstance=""						# the last instance to process, skipping any lexicographically later; if empty, continues through the entire suite
-dataset=1							# which instances to consider: 1 to exclude very hard instances, 0 for all instances, -1 for only very hard instances
+dataset=0							# which instances to consider: 1 to exclude very hard instances, 0 for all instances, -1 for only very hard instances
 num_threads=32 						# check 8, 16, 32
 
 

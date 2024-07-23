@@ -140,6 +140,8 @@ pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;
     //something to track history entry usage
 /////////////////////////////////////////
 
+static vector<int> real_best {0, 198, 197, 196, 194, 195, 193, 191, 192, 189, 190, 188, 186, 185, 187, 184, 182, 181, 183, 179, 180, 178, 175, 173, 177, 176, 172, 171, 174, 170, 168, 169, 167, 166, 165, 164, 163, 162, 161, 159, 158, 157, 155, 156, 153, 160, 152, 154, 151, 150, 149, 148, 147, 146, 145, 143, 144, 142, 137, 140, 138, 136, 141, 135, 139, 134, 133, 131, 132, 129, 128, 126, 127, 123, 130, 124, 125, 122, 120, 121, 119, 118, 117, 116, 113, 115, 114, 112, 111, 110, 109, 108, 106, 107, 105, 104, 102, 103, 101, 100, 99, 94, 98, 93, 97, 96, 95, 92, 91, 90, 89, 88, 87, 86, 85, 84, 81, 83, 79, 82, 80, 77, 75, 78, 76, 74, 73, 72, 71, 70, 69, 65, 68, 66, 67, 64, 62, 63, 61, 59, 60, 58, 57, 56, 55, 51, 53, 54, 52, 50, 49, 48, 47, 46, 45, 44, 43, 42, 40, 39, 41, 38, 37, 36, 35, 34, 32, 33, 31, 30, 29, 28, 27, 25, 26, 24, 23, 22, 21, 20, 17, 19, 18, 16, 14, 15, 13, 12, 11, 9, 10, 7, 6, 8, 5, 4, 3, 1, 2, 199};
+
 /* --------------------- Static Functions -------------------------*/
 // Compare two edges in the cost graph, a and b by their weight. a > b (therefore "better"), if a.weight < b.weight
 bool compare_edge(const edge a, const edge b) { return a.weight < b.weight; }
@@ -804,7 +806,27 @@ void solver::enumerate(){
                 bool prefix_key_matched = false;
                 if (check_stop_request(active_node.history_key, active_node.sequence, &prefix_key_matched))
                 {
-                     work_remaining[thread_id] -= active_node.current_node_value;
+                    // bool follows_best = true;
+                    // for(int i = 0; i < active_node.sequence.size(); i++){
+                    //     if(active_node.sequence[i] != real_best[i]){
+                    //         follows_best = false;
+                    //         break;
+                    //     }
+                    // }
+                    // if(follows_best){
+                    //     cout << "Pruned Best Cost" << endl;
+                    //     cout <<"------------------------"<< endl;
+                    //     for(int i : active_node.sequence){
+                    //         cout << i <<", ";
+                    //     }
+                    //     cout <<"\n------------"<< endl;
+                    //     cout <<history_table.retrieve(problem_state.history_key)->entry.load().lower_bound<< endl;
+                    //     cout <<problem_state.lower_bound<< endl;
+                    //     cout <<thread_requests[thread_id].request.key<< endl;
+                    //     cout <<thread_requests[thread_id].request.target_last_node<< endl;
+                    //     cout <<thread_requests[thread_id].request.target_prefix_cost<< endl;
+                    // }
+                    work_remaining[thread_id] -= active_node.current_node_value;
                     if (prefix_key_matched)
                         break;
                     else
@@ -834,6 +856,10 @@ void solver::enumerate(){
 
             enumerate();
 
+            HistoryNode *history_node = history_table.retrieve(problem_state.history_key);
+            if(history_node && history_node->active_threadID == thread_id)
+                history_node->explored = true;
+
             /* Untake */
             problem_state.enumeration_depth--;
             // problem_state.suffix_cost????
@@ -848,6 +874,8 @@ void solver::enumerate(){
             problem_state.taken_arr[taken_node] = false;
             problem_state.current_path.pop_back();
 
+            
+
 
             if (thread_id == 0)
             { // check if out of time
@@ -861,6 +889,19 @@ void solver::enumerate(){
             }
         }
         while (local_pools->pop_from_active_list(thread_id, active_node)){
+            // bool follows_best = true;
+            // for (int i = 0; i < active_node.sequence.size(); i++)
+            // {
+            //     if (active_node.sequence[i] != real_best[i])
+            //     {
+            //         follows_best = false;
+            //         break;
+            //     }
+            // }
+            // if (follows_best)
+            // {
+            //     cout << "Pruned Best Cost by group" << endl;
+            // }
             work_remaining[thread_id] -= active_node.current_node_value;
         }
         local_pools->pop_active_list(thread_id); // TODO: make sure with thread stopping that this is handled properly
@@ -1321,10 +1362,41 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
                 thread_requests[target_ID].lock.lock();
                 if (!thread_requests[target_ID].has_request || thread_requests[target_ID].request.target_depth > (int)problem_state.current_path.size()) // extra validation
                 {
+                    // path_node pnode;
+                    // if (local_pools->peek_from_active_list(target_ID, pnode))
+                    // {
+                    //     bool follows_best = true;
+                    //     for (int i = 0; i < pnode.sequence.size() - 1; i++)
+                    //     {
+                    //         if (pnode.sequence[i] != real_best[i])
+                    //         {
+                    //             follows_best = false;
+                    //             break;
+                    //         }
+                    //     }
+                    //     if (follows_best)
+                    //     {
+                    //         cout << "TRYING TO PRUNE BEST SOLUTION" << endl;
+                    //         cout << "-----------Bad Path-------------\n";
+                    //         cout << problem_state.current_cost << endl;
+                    //         for(int i = 0; i < problem_state.current_path.size(); i++)
+                    //             cout << problem_state.current_path[i] << ", ";
+                    //         cout << "\n-----------Best Path-------------\n";
+                    //         int t_best_cost = 0;
+                    //         for(int i = 1; i < problem_state.current_path.size(); i++)
+                    //             t_best_cost += cost_graph[real_best[i - 1]][real_best[i]].weight;
+                    //         cout << t_best_cost << endl;
+                    //         for(int i = 0; i < problem_state.current_path.size(); i++)
+                    //             cout << real_best[i] << ", ";
+                    //         cout << "\n----------------------\n";
+                    //     }
+                    // }
+
                     thread_stop_requested++;
                     thread_requests[target_ID].request = request_packet(problem_state.current_path.back(), (int)problem_state.current_path.size(),
                                                                         content.prefix_cost, target_ID, key.first);
                     thread_requests[target_ID].has_request = true;
+                    thread_requests[thread_id].has_request = false;
                 }
                 thread_requests[target_ID].lock.unlock();
             }
@@ -1517,7 +1589,13 @@ bool solver::check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_
             // {
                 if (rp.target_depth <= sequence.size())
                 {
-                    if (rp.target_last_node == sequence[rp.target_depth - 1])
+                    int current_cost = problem_state.current_cost;
+                    for(int i = 0; i < sequence.size() - rp.target_depth; i++){
+                        current_cost -= cost_graph[cost_graph.size() - i - 1][cost_graph.size() - i].weight;
+                    }
+
+
+                    if (rp.target_last_node == sequence[rp.target_depth - 1] && current_cost >= rp.target_prefix_cost)
                     {
                         thread_stop_check++;
                         if (rp.key == history_key.first) // will only occur when the size of the target_depth and sequence size is same
