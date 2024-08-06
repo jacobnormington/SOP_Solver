@@ -124,7 +124,7 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
 
     HistoryNode *node = memory_allocators[group_index][thread_id].retrieve_his_node();
 
-    if (thread_id == 1)
+    if (thread_id % 4  == 0)
     {
         insert_count++;
         if (insert_count >= 100000)
