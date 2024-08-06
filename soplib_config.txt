@@ -8,7 +8,7 @@ Global_Pool_Size = 1
 Level = 250
 
 //Memory_Restriction (in % from 0 - 1)
-Restrict_Per = 0.8
+Restrict_Per = 0.9
 
 //History table entry will always be added if depth is below this value
 History_depth = -1
@@ -23,13 +23,13 @@ Cycle_Time = 3600
 Group_Thread_Count = 4
 
 //Work Stealing (1 for enable 0 for disable)
-Enable = 0
+Enable = 1
 
 //Thread Stopping (1 for enable 0 for disable)
 Enable = 1
 
 //Run in parallel with LKH (1 for enable 0 for disable)
-Enable = 0
+Enable = 1
 
 //Enable Progress Estimation (1 for enable 0 for disable)
-Enable = 0
+Enable = 1
