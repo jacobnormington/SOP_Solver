@@ -373,6 +373,7 @@ void solver::solve(string f_name, int thread_num)
     cout << "thread stop check: " << thread_stop_check << "\n";
     cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
 
+    // to count the number of entries at different level in history table and their references
     history_table.track_entries_and_references();
 
     for (int i = 0; i < steal_success.size(); i++)
