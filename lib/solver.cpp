@@ -101,7 +101,7 @@ static vector<thread_request> thread_requests(32);
 // static mutex pause_lock;                       //
 // static mutex ptselct_lock;                     //
 static atomic<bool> stop_sig(false); // if any threads are currently being requested to stop
-static vector<long long int> history_table_pruning_success = vector<long long int>(380);
+// static vector<long long int> history_table_pruning_success = vector<long long int>(380); // uncomment to track the pruning at each depth and set the size of the instance
 
 static atomic<int> thread_stop_requested(0);
 static atomic<int> thread_stop_check(0);
@@ -210,8 +210,6 @@ void solver::assign_parameter(vector<string> setting)
     inhis_mem_limit = atof(setting[3].c_str());
     std::cout << "History table mem limit = " << inhis_mem_limit << std::endl;
 
-    mem_limit = inhis_mem_limit - 0.2;
-    std::cout << "Blocking mem limit = " << mem_limit << std::endl;
     // inhis_depth = atof(setting[4].c_str());
     // std::cout << "History table depth to always add = " << inhis_depth << std::endl;
 
@@ -243,7 +241,16 @@ void solver::assign_parameter(vector<string> setting)
     std::cout << "Number of groups = " << number_of_groups << std::endl;
 
     group_size = atoi(setting[13].c_str());
-    std::cout << "Group size = " << group_size << std::endl;
+    std::cout << "Group size in config = " << group_size << std::endl;
+
+    if (number_of_groups - 1 >= 1)
+        mem_limit = inhis_mem_limit - (number_of_groups - 1) * 0.1;
+    else
+    {
+        mem_limit = inhis_mem_limit; // if the bucket size is one, the mem limit would be same as config file
+        is_all_table_blocked = true; // by setting this to true, we are saying that all the buckets are blocked except first bucket
+    }
+    std::cout << "Blocking mem limit = " << mem_limit << std::endl;
 
     return;
 }
@@ -307,7 +314,8 @@ void solver::solve(string f_name, int thread_num)
             problem_state.depCnt[dependency_graph[i][k]]++;
         }
     }
-
+    group_size = instance_size / number_of_groups;
+    std::cout << "Group size after splitting instance size in 3 equal part = " << group_size << std::endl;
     default_state = problem_state; // a copy of problem_state, since structs are passed by value
     std::cout << "Instance size is " << instance_size - 2 << std::endl;
 
@@ -364,6 +372,8 @@ void solver::solve(string f_name, int thread_num)
     cout << "thread stop requested: " << thread_stop_requested << "\n";
     cout << "thread stop check: " << thread_stop_check << "\n";
     cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
+
+    history_table.track_entries_and_references();
 
     for (int i = 0; i < steal_success.size(); i++)
         cout << steal_success[i] << ", ";
@@ -807,22 +817,26 @@ void solver::enumerate()
                     lower_bound = dynamic_hungarian(source_node, taken_node);
                     // TODO_VIKAS: can we check the lower bound with the best cost before inserting into the history table
 
-                    if (!limit_insertion) {
+                    if (!limit_insertion)
+                    {
                         if (history_table.get_current_size() < mem_limit * history_table.get_max_size())
                             push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
-                        else {
-                            if (!is_all_table_blocked) {
-                                if (!history_table.check_and_manage_memory(problem_state.current_path.size(), &mem_limit, &is_all_table_blocked)) 
+                        else
+                        {
+                            if (!is_all_table_blocked)
+                            {
+                                if (!history_table.check_and_manage_memory(problem_state.current_path.size(), &mem_limit, &is_all_table_blocked))
                                     push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
                             }
-                            else {
-                                if (history_table.get_current_size() >= mem_limit * history_table.get_max_size()) {
+                            else
+                            {
+                                if (history_table.get_current_size() >= mem_limit * history_table.get_max_size())
+                                {
                                     bool is_space_increased_or_available = history_table.free_subtable_memory(&mem_limit);
-                                    if (is_space_increased_or_available && problem_state.current_path.size() <= group_size) 
+                                    if (is_space_increased_or_available && problem_state.current_path.size() <= group_size)
                                         push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
                                     else
                                         limit_insertion = true;
-                                    
                                 }
                             }
                         }
@@ -831,7 +845,7 @@ void solver::enumerate()
                 else if (taken && !decision)
                 { // if this path is dominated by another path
                     // tracking the pruning at current depth
-                    history_table_pruning_success[problem_state.current_path.size()]++;
+                    // history_table_pruning_success[problem_state.current_path.size()]++;
                     pruned_count++;
                     prune(source_node, taken_node);
                     continue;
@@ -1627,7 +1641,7 @@ bool solver::check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_
                     if (rp.key == history_key.first) // will only occur when the size of the target_depth and sequence size is same
                     {
                         // tracking the pruning at current depth
-                        history_table_pruning_success[sequence.size()]++;
+                        // history_table_pruning_success[sequence.size()]++;
                         thread_stopped_successfully++;
                         thread_requests[thread_id].has_request = false;
                         thread_requests[thread_id].lock.unlock();
@@ -1636,7 +1650,7 @@ bool solver::check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_
                     else if (rp.key == generate_history_key(sequence, rp.target_depth)) // will only occur when the size of the target_depth and sequence size is different
                     {
                         // tracking the pruning at current depth
-                        history_table_pruning_success[sequence.size()]++;
+                        // history_table_pruning_success[sequence.size()]++;
                         thread_stopped_successfully++;
                         *prefixKeyMatched = true;
                         thread_requests[thread_id].lock.unlock();

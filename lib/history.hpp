@@ -17,6 +17,7 @@ struct HistoryContent
 struct HistoryNode
 {
 	atomic<bool> explored;			 // if the subspace under this node has already been fully explored
+	atomic<bool> referred;			 // if the subspace under this node has already been fully explored
 	atomic<uint8_t> active_threadID; // the thread that is exploring this subspace (there can only ever be one, because any others would be stopped)
 	atomic<HistoryContent> entry;
 };

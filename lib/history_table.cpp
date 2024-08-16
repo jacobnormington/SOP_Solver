@@ -124,7 +124,7 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
 
     HistoryNode *node = memory_allocators[group_index][thread_id].retrieve_his_node();
 
-    if (thread_id % 4  == 0)
+    if (thread_id % 4 == 0)
     {
         insert_count++;
         if (insert_count >= 100000)
@@ -190,6 +190,7 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
     {
         if (key.second == map[group_index][bucket]->begin()->first.second && key.first == map[group_index][bucket]->begin()->first.first)
         {
+            map[group_index][bucket]->begin()->second->referred = true;
             table_lock[group_index][bucket / COVER_AREA].unlock();
             return map[group_index][bucket]->begin()->second;
         }
@@ -204,6 +205,7 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
         {
             if (key.second == iter->first.second && key.first == iter->first.first)
             {
+                iter->second->referred = true;
                 table_lock[group_index][bucket / COVER_AREA].unlock();
                 return iter->second;
             }
@@ -261,6 +263,8 @@ bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit,
 
 bool History_Table::free_subtable_memory(float *mem_limit)
 {
+    if (num_of_groups == 1)
+        return false;
     for (int i = memory_allocators.size() - 1; i > 0; --i)
     {
         if (current_size < *mem_limit * max_size)
@@ -306,4 +310,85 @@ bool History_Table::free_subtable_memory(float *mem_limit)
         }
     }
     return false;
+}
+void History_Table::track_entries_and_references()
+{
+
+    long total_entries = 0;
+    long total_references = 0;
+
+    // Iterate over all buckets in map[0]
+    for (Bucket *bucket : map[0])
+    {
+        if (!bucket)
+            continue; // Skip if the bucket pointer is NULL
+
+        // Iterate over each Entry in the bucket
+        for (auto &entry : *bucket)
+        {
+            total_entries++;
+            HistoryNode *history_node = entry.second;
+
+            // Check if the node has been referred
+            if (history_node && history_node->referred)
+            {
+                total_references++;
+            }
+        }
+    }
+
+    cout << "Total Entries 0: " << total_entries << endl;
+    cout << "Total References 0: " << total_references << endl;
+
+    total_entries = 0;
+    total_references = 0;
+
+    // Iterate over all buckets in map[0]
+    for (Bucket *bucket : map[1])
+    {
+        if (!bucket)
+            continue; // Skip if the bucket pointer is NULL
+
+        // Iterate over each Entry in the bucket
+        for (auto &entry : *bucket)
+        {
+            total_entries++;
+            HistoryNode *history_node = entry.second;
+
+            // Check if the node has been referred
+            if (history_node && history_node->referred)
+            {
+                total_references++;
+            }
+        }
+    }
+
+    cout << "Total Entries 1: " << total_entries << endl;
+    cout << "Total References 1: " << total_references << endl;
+
+    total_entries = 0;
+    total_references = 0;
+
+    // Iterate over all buckets in map[0]
+    for (Bucket *bucket : map[2])
+    {
+        if (!bucket)
+            continue; // Skip if the bucket pointer is NULL
+
+        // Iterate over each Entry in the bucket
+        for (auto &entry : *bucket)
+        {
+            total_entries++;
+            HistoryNode *history_node = entry.second;
+
+            // Check if the node has been referred
+            if (history_node && history_node->referred)
+            {
+                total_references++;
+            }
+        }
+    }
+
+    cout << "Total Entries 2: " << total_entries << endl;
+    cout << "Total References 2: " << total_references << endl;
 }

@@ -102,6 +102,7 @@ public:
     HistoryNode *retrieve(Key &key, int depth);
     bool check_and_manage_memory(int depth, float *updatedMemLimit, bool *is_all_table_blocked);
     bool free_subtable_memory(float *mem_limit);
+    void track_entries_and_references();
 };
 
 #endif
