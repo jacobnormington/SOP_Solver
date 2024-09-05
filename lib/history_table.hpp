@@ -63,11 +63,12 @@ private:
     int num_of_groups; // the number of groups in history table
     int groups_size;   // the size of each depth group
 
-    vector<bool> blocked_groups;   // track which groups are blocked from insertions
+    vector<bool> blocked_groups;    // track which groups are blocked from insertions
     vector<bool> is_data_available; // tracks whether data is available in each subtable
     vector<spin_lock> group_locks;
 
     vector<long> block_count;
+
 public:
     /* Create a new history table object.
         size - the number of buckets the history table should be stored in */
@@ -95,14 +96,14 @@ public:
         backtracked - whether the subspace under this node has already been explored
         depth - the depth of this node (size of the current partial path)
         Return- a pointer to the node created */
-    HistoryNode *insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth);
+    HistoryNode *insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth, int temp_group_size);
     /* Find a history table entry based on a specific key.
         key - the history key corresponding to the partial path this entry represents
         Return- a pointer to the node found, if any */
     HistoryNode *retrieve(Key &key, int depth);
     bool check_and_manage_memory(int depth, float *updatedMemLimit, bool *is_all_table_blocked);
-    bool free_subtable_memory(float *mem_limit);
-    void track_entries_and_references();
+    bool free_subtable_memory(float *mem_limit); // free the history table memory
+    void track_entries_and_references();         // to track down the entries and its reference in history_table
 };
 
 #endif

@@ -11,6 +11,7 @@ extern "C"
 // from command line arguments
 static string filename;      // name of the sop input file
 static int thread_total = 0; // number of threads to use for B&B enumeration (not counting the LKH thread)
+static bool limit_insertion = false;
 
 // from config file
 static int t_limit = 0;          // time limit, in seconds
@@ -636,7 +637,7 @@ void solver::solve_parallel()
     sort(global_pool.begin(), global_pool.end(), global_pool_sort);
     gp_const = global_pool.size();
     gp_complete = global_pool.size();
-    cout << "Setting the parameters to track the work done" << endl;
+    // cout << "Setting the parameters to track the work done" << endl;
 
     delete solver_container;
     /* End Splitting Operation */
@@ -748,7 +749,7 @@ void solver::enumerate()
         int pruned_count = 0;
 
         deque<path_node> ready_list;
-        bool limit_insertion = false;
+        // bool limit_insertion = false;
         for (int taken_node = 0; taken_node < instance_size; taken_node++)
         {
             if (!problem_state.depCnt[taken_node] && !problem_state.taken_arr[taken_node])
@@ -823,6 +824,15 @@ void solver::enumerate()
                     {
                         if (history_table.get_current_size() < mem_limit * history_table.get_max_size())
                             push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
+                        else if (number_of_groups == 1)
+                        {
+                            history_table.free_subtable_memory(&mem_limit);
+                            // above function will not free any memory since we
+                            // only have one bucket, we just blocking insertion
+                            // by makking blocked_groups[0] = true;
+                            cout << "time is: " << main_timer.get_time_seconds() << endl;
+                            limit_insertion = true;
+                        }
                         else
                         {
                             if (!is_all_table_blocked)
@@ -835,11 +845,19 @@ void solver::enumerate()
                                 if (history_table.get_current_size() >= mem_limit * history_table.get_max_size())
                                 {
                                     bool is_space_increased_or_available = history_table.free_subtable_memory(&mem_limit);
-                                    if (is_space_increased_or_available && problem_state.current_path.size() <= group_size)
-                                        push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
+                                    if (is_space_increased_or_available)
+                                    {
+                                        if (problem_state.current_path.size() <= group_size)
+                                            push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
+                                    }
                                     else
+                                    {
+                                        cout << "time is: " << main_timer.get_time_seconds() << endl;
                                         limit_insertion = true;
+                                    }
                                 }
+                                else
+                                    push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
                             }
                         }
                     }
@@ -1452,9 +1470,9 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
 void solver::push_to_history_table(Key &key, int lower_bound, HistoryNode **entry, bool backtracked)
 {
     if (entry == NULL)
-        history_table.insert(key, problem_state.current_cost, lower_bound, thread_id, backtracked, problem_state.current_path.size());
+        history_table.insert(key, problem_state.current_cost, lower_bound, thread_id, backtracked, problem_state.current_path.size(), instance_size / 3);
     else
-        *entry = history_table.insert(key, problem_state.current_cost, lower_bound, thread_id, backtracked, problem_state.current_path.size());
+        *entry = history_table.insert(key, problem_state.current_cost, lower_bound, thread_id, backtracked, problem_state.current_path.size(), instance_size / 3);
     return;
 }
 
@@ -1473,7 +1491,10 @@ bool solver::workload_request()
         thread_requests[thread_id].lock.unlock();
     }
     if (work_remaining[thread_id] != 0)
-        cout << "ERROR!!! thread " << thread_id << " at workstealing with " << work_remaining[thread_id] << " work remaining" << endl;
+    {
+
+        // cout << "ERROR!!! thread " << thread_id << " at workstealing with " << work_remaining[thread_id] << " work remaining" << endl;
+    }
     local_pools->set_pool_depth(thread_id, INT32_MAX);
     if (!global_pool.empty())
     {

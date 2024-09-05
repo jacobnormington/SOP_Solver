@@ -2,6 +2,12 @@
 
 #define MEMORY_RESTRIC 0.95
 #define SAMPLE_FREQUENCY 60
+#include <condition_variable>
+#include <mutex>
+
+static bool is_working = false;
+std::mutex mtx;
+std::condition_variable cv;
 
 Memory_Module::Memory_Module()
 {
@@ -55,6 +61,8 @@ History_Table::History_Table(size_t size)
     num_buckets = size;
     total_ram = info.totalram;
     max_size = (double)info.freeram * MEMORY_RESTRIC - (size * 4);
+    cout << "Total RAM (in bytes): " << total_ram / 1000000 << " MB" << std::endl;
+    cout << "allowed RAM size (in bytes): " << max_size / 1000000 << " MB" << std::endl;
     current_size = 0;
 
     // std::cout << "Max bucket size is " << max_size / 1000000 << " MB" << std::endl;
@@ -104,21 +112,27 @@ unsigned long History_Table::get_free_mem()
 
 void History_Table::print_curmem()
 {
-    std::cout << "Mem exhausted is " << current_size / 1000000 << "MB" << std::endl;
+    std::cout << "Current memory is " << current_size / 1000000 << " MB" << std::endl;
     return;
 }
 
-HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth)
+HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth, int temp_group_size)
 {
     int group_index;
-    if (depth <= num_of_groups * groups_size)
+    if (num_of_groups > 1 && depth <= num_of_groups * groups_size)
         group_index = std::ceil(static_cast<double>(depth) / groups_size) - 1;
     else
         group_index = num_of_groups - 1;
 
-    if (!is_data_available[group_index] || blocked_groups[group_index])
+    // int index;
+    // if (depth <= 3 * temp_group_size)
+    //     index = std::ceil(static_cast<double>(depth) / temp_group_size) - 1;
+    // else
+    //     index = 3 - 1;
+
+    if (blocked_groups[group_index])
     {
-        block_count[group_index]++;
+        // block_count[group_index]++;
         return NULL;
     }
 
@@ -143,6 +157,7 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
     node->explored = backtracked;
     node->entry.store({prefix_cost, lower_bound});
     node->active_threadID = thread_id;
+    // node->level = index;
     // node->depth = depth;
     // node->usage_cnt = 0;
 
@@ -181,7 +196,7 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
     int bucket = (val + key.second) % num_buckets;
 
     table_lock[group_index][bucket / COVER_AREA].lock();
-    if (!is_data_available[group_index] || map[group_index][bucket] == NULL)
+    if (map[group_index][bucket] == NULL)
     {
         table_lock[group_index][bucket / COVER_AREA].unlock();
         return NULL;
@@ -225,6 +240,7 @@ bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit,
 
     for (int i = memory_allocators.size() - 1; i > 0; --i)
     {
+        current_size = total_ram - get_free_mem();
         // cout << "attempted to block the group :" << group_index << "\n";
         if (current_size < *updated_mem_limit * max_size)
             return blocked_groups[group_index];
@@ -247,10 +263,10 @@ bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit,
             *updated_mem_limit += 0.1f;
             cout << "Updated memory limit: " << *updated_mem_limit << std::endl;
 
-            for (int j = memory_allocators.size() - 1; j >= 0; --j)
-            {
-                cout << blocked_groups[j] << " ";
-            }
+            // for (int j = memory_allocators.size() - 1; j >= 0; --j)
+            // {
+            //     cout << blocked_groups[j] << " ";
+            // }
             cout << "\n";
             group_locks[i].unlock();
             return blocked_groups[i]; // if the subtable number is equal to the blocking group, we CAN"T insert that record by returning TRUE
@@ -263,31 +279,50 @@ bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit,
 
 bool History_Table::free_subtable_memory(float *mem_limit)
 {
-    if (num_of_groups == 1)
-        return false;
-    for (int i = memory_allocators.size() - 1; i > 0; --i)
+    std::unique_lock<std::mutex> lock(mtx);  // Lock for the entire function to synchronize threads
+
+    for (int i = memory_allocators.size() - 1; i >= 0; --i)
     {
+        // Wait until no thread is working
+        cv.wait(lock, [] { return !is_working; });
+
+        current_size = total_ram - get_free_mem();
+        if (current_size >= *mem_limit * max_size && i == 0)
+        {
+            blocked_groups[i] = true;
+            print_curmem();
+            // if i == 0 is true, we don't have anything left to clear out except
+            // the last remaining bucket that's why we always return false here
+            return false;
+        }
         if (current_size < *mem_limit * max_size)
             return true;
 
         if (blocked_groups[i] && is_data_available[i]) // Ensure the group is blocked and data is there
         {
+
             // cout << "locking the group\n";
             group_locks[i].lock();
+            is_working = true;
+            lock.unlock();  // Unlock the main mutex to allow other threads to enter wait state
+
+            current_size = total_ram - get_free_mem();
             if (current_size < *mem_limit * max_size)
             {
+                is_working = false;
                 group_locks[i].unlock();
+                cv.notify_all();  // Notify other waiting threads
                 return true;
             }
 
-            // // Free the memory if group entry is blocked and data is available
+            // Free the memory if group entry is blocked and data is available
             if (blocked_groups[i] && is_data_available[i])
             {
                 is_data_available[i] = false;
                 cout << "starting the deallocation of memory\n";
                 current_size = total_ram - get_free_mem();
-                std::cout << "current used size before (in bytes): " << current_size << std::endl;
-                std::cout << "size of subtable " << i + 1 << " (in bytes): " << sizeof(memory_allocators[i]) << std::endl;
+
+                std::cout << "current used size before (in bytes): " << current_size / 1000000 << " MB" << std::endl;
 
                 for (auto &allocator : memory_allocators[i])
                 {
@@ -297,98 +332,65 @@ bool History_Table::free_subtable_memory(float *mem_limit)
                 std::cout << "Freed memory for subtable: " << i + 1 << std::endl;
 
                 current_size = total_ram - get_free_mem();
-                std::cout << "current used size after freeing space (in bytes): " << current_size << std::endl;
-                for (int k = 0; k < 3; k++)
-                {
-                    cout << block_count[k] << " ";
-                }
+                std::cout << "current used size after freeing space (in bytes): " << current_size / 1000000 << " MB" << std::endl;
+                // for (int k = 0; k < 3; k++)
+                // {
+                //     cout << block_count[k] << " ";
+                // }
                 cout << "\n";
+                is_working = false;
                 group_locks[i].unlock();
+                cv.notify_all();  // Notify other waiting threads
                 return true;
             }
             group_locks[i].unlock();
+            is_working = false;
+            cv.notify_all();  // Notify other waiting threads
         }
     }
-    return false;
+    return (current_size < *mem_limit * max_size);
 }
 void History_Table::track_entries_and_references()
 {
-
     long total_entries = 0;
     long total_references = 0;
 
-    // Iterate over all buckets in map[0]
-    for (Bucket *bucket : map[0])
+    vector<long long> total_entries_single_table(3, 0);
+    vector<long long> total_references_single_table(3, 0);
+
+    for (int i = 0; i < num_of_groups; ++i)
     {
-        if (!bucket)
-            continue; // Skip if the bucket pointer is NULL
+        total_entries = 0;
+        total_references = 0;
 
-        // Iterate over each Entry in the bucket
-        for (auto &entry : *bucket)
-        {
-            total_entries++;
-            HistoryNode *history_node = entry.second;
-
-            // Check if the node has been referred
-            if (history_node && history_node->referred)
+        if (num_of_groups == 1 || is_data_available[i])
+            for (Bucket *bucket : map[i])
             {
-                total_references++;
+                if (!bucket)
+                    continue; // Skip if the bucket pointer is NULL
+
+                // Iterate over each Entry in the bucket
+                for (auto &entry : *bucket)
+                {
+                    HistoryNode *history_node = entry.second;
+
+                    // Check if history_node is not nullptr before accessing its members
+                    if (!history_node)
+                        continue;
+
+                    int index = history_node->level;
+                    if (index > 2)
+                        cout << "incorrect index";
+
+                    total_entries_single_table[index]++;
+                    if (history_node->referred)
+                        total_references_single_table[index]++;
+                }
             }
-        }
     }
-
-    cout << "Total Entries 0: " << total_entries << endl;
-    cout << "Total References 0: " << total_references << endl;
-
-    total_entries = 0;
-    total_references = 0;
-
-    // Iterate over all buckets in map[0]
-    for (Bucket *bucket : map[1])
+    for (int i = 0; i < 3; ++i)
     {
-        if (!bucket)
-            continue; // Skip if the bucket pointer is NULL
-
-        // Iterate over each Entry in the bucket
-        for (auto &entry : *bucket)
-        {
-            total_entries++;
-            HistoryNode *history_node = entry.second;
-
-            // Check if the node has been referred
-            if (history_node && history_node->referred)
-            {
-                total_references++;
-            }
-        }
+        cout << "Total Entries Single Table " << i << ": " << total_entries_single_table[i] << endl;
+        cout << "Total References Single Table " << i << ": " << total_references_single_table[i] << endl;
     }
-
-    cout << "Total Entries 1: " << total_entries << endl;
-    cout << "Total References 1: " << total_references << endl;
-
-    total_entries = 0;
-    total_references = 0;
-
-    // Iterate over all buckets in map[0]
-    for (Bucket *bucket : map[2])
-    {
-        if (!bucket)
-            continue; // Skip if the bucket pointer is NULL
-
-        // Iterate over each Entry in the bucket
-        for (auto &entry : *bucket)
-        {
-            total_entries++;
-            HistoryNode *history_node = entry.second;
-
-            // Check if the node has been referred
-            if (history_node && history_node->referred)
-            {
-                total_references++;
-            }
-        }
-    }
-
-    cout << "Total Entries 2: " << total_entries << endl;
-    cout << "Total References 2: " << total_references << endl;
 }
