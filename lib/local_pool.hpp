@@ -19,6 +19,8 @@
             std::vector<int> depths;
         public:
             local_pool(int thread_count);
+            // void print_top_sequence_sizes(int thread_total);
+            // void print_top_sequence_sizes_end(int thread_total);
             void add_to_depth_queue(int thread);
             /*Grabs a node from the shallowest / zero pool*/
             bool pop_from_zero_list(int thread_number, path_node &result_node, int stealing_thread);

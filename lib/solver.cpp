@@ -397,36 +397,35 @@ void solver::solve(string f_name, int thread_num)
     // to count the number of entries at different level in history table and their references
     history_table.track_entries_and_references();
 
-
     /** uncomment the code below to find the work done in the global pool
 cout << "gp const: " << gp_const << "\n";
 cout << "gp temp: " << gp_complete << "\n";
 
-long double total_work_done = 0; // work done in threads  // thread - work remaining
-long double total_work_rem = 0;
+    long double total_work_done = 0; // work done in threads  // thread - work remaining
+    long double total_work_rem = 0;
 
-// Calculate the total remaining work
-for (const auto &work : work_remaining)
-{
-    total_work_done += (1 - (static_cast<long double>(work.load()) / ULLONG_MAX));
-    total_work_rem += (static_cast<long double>(work.load()) / ULLONG_MAX);
-}
+    // Calculate the total remaining work
+    for (const auto &work : work_remaining)
+    {
+        total_work_done += (1 - (static_cast<long double>(work.load()) / ULLONG_MAX));
+        total_work_rem += (static_cast<long double>(work.load()) / ULLONG_MAX);
+    }
 
-std::cout << "Total Work done in threads: " << total_work_done << std::endl;
-std::cout << "Total Work remaining in threads: " << total_work_rem << std::endl;
+    std::cout << "Total Work done in threads: " << total_work_done << std::endl;
+    std::cout << "Total Work remaining in threads: " << total_work_rem << std::endl;
 
-long double total_global_work_done = 0;
-// Total global work done
+    long double total_global_work_done = 0;
+    // Total global work done
 
-total_global_work_done = gp_const - gp_complete - 31 + total_work_done;
+    total_global_work_done = gp_const - gp_complete - 31 + total_work_done;
 
-std::cout << "Total global work done: " << total_global_work_done << std::endl;
-// Calculate the percentage of work done
-long double percentage_done = (total_global_work_done / gp_const) * 100;
-std::cout << "Percentage of work done: " << percentage_done << "%" << std::endl;
+    std::cout << "Total global work done: " << total_global_work_done << std::endl;
+    // Calculate the percentage of work done
+    long double percentage_done = (total_global_work_done / gp_const) * 100;
+    std::cout << "Percentage of work done: " << percentage_done << "%" << std::endl;
 
-std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
-          << std::endl;
+    std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
+              << std::endl;
 
 */
     /** uncomment to print the pruning happening at each level
@@ -735,7 +734,9 @@ void solver::solve_parallel()
     BB_Complete = true;
 
     if (time_out)
+    {
         cout << "instance timed out " << endl;
+    }
 
     return;
 }
@@ -744,6 +745,9 @@ void solver::enumerate()
 {
     while (!time_out)
     {
+        // if (main_timer.get_time_seconds() > 3598)
+        //     local_pools->print_top_sequence_sizes_end(thread_total);
+
         // PROGRESS variables
         int ready_node_count = 0;
         int pruned_count = 0;
@@ -844,6 +848,7 @@ void solver::enumerate()
                             {
                                 if (history_table.get_current_size() >= mem_limit * history_table.get_max_size())
                                 {
+                                    // local_pools->print_top_sequence_sizes(thread_total);
                                     bool is_space_increased_or_available = history_table.free_subtable_memory(&mem_limit);
                                     if (is_space_increased_or_available)
                                     {
