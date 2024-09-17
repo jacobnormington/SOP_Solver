@@ -1,4 +1,4 @@
-# SOP_Solver
+1# SOP_Solver
 
 A parallel Branch and Bound solution to the Sequential Ordering Problem (SOP).
 
@@ -106,3 +106,8 @@ Let's consider a sequence of events happening sequentially, with `Restrict_Per` 
   - Stop inserting into the first bucket.
 
 This approach ensures that memory is managed efficiently by gradually restricting insertions and freeing memory as consumption levels increase.
+
+## Version
+
+- `version_1.0.0`: Branch before merging the history changes
+- `main`: Latest branch with all the history changes merged into it
