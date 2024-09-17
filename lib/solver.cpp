@@ -395,7 +395,7 @@ void solver::solve(string f_name, int thread_num)
     }
 
     // to count the number of entries at different level in history table and their references
-    history_table.track_entries_and_references();
+    // history_table.track_entries_and_references();
 
     /** uncomment the code below to find the work done in the global pool
 cout << "gp const: " << gp_const << "\n";
@@ -634,6 +634,8 @@ void solver::solve_parallel()
         }
     }
     sort(global_pool.begin(), global_pool.end(), global_pool_sort);
+
+    history_table.update_gp_depth(global_pool.at(0).sequence.size());
     gp_const = global_pool.size();
     gp_complete = global_pool.size();
     // cout << "Setting the parameters to track the work done" << endl;

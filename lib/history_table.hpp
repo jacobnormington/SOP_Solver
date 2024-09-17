@@ -104,6 +104,8 @@ public:
     bool check_and_manage_memory(int depth, float *updatedMemLimit, bool *is_all_table_blocked);
     bool free_subtable_memory(float *mem_limit); // free the history table memory
     void track_entries_and_references();         // to track down the entries and its reference in history_table
+    int get_bucket_index(int depth);             // fetching the bucket index based on the depth of the newer entry
+    void update_gp_depth(int gp_depth);          // updating the global pool entry size
 };
 
 #endif

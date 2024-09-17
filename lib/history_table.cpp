@@ -6,6 +6,7 @@
 #include <mutex>
 
 static bool is_working = false;
+int gp_depth = 0;
 std::mutex mtx;
 std::condition_variable cv;
 
@@ -118,11 +119,12 @@ void History_Table::print_curmem()
 
 HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth, int temp_group_size)
 {
-    int group_index;
-    if (num_of_groups > 1 && depth <= num_of_groups * groups_size)
-        group_index = std::ceil(static_cast<double>(depth) / groups_size) - 1;
-    else
-        group_index = num_of_groups - 1;
+    int group_index = get_bucket_index(depth);
+
+    // if (num_of_groups > 1 && depth <= num_of_groups * groups_size)
+    //     group_index = std::ceil(static_cast<double>(depth) / groups_size) - 1;
+    // else
+    //     group_index = num_of_groups - 1;
 
     // int index;
     // if (depth <= 3 * temp_group_size)
@@ -232,11 +234,7 @@ HistoryNode *History_Table::retrieve(Key &key, int depth)
 
 bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit, bool *is_all_table_blocked)
 {
-    int group_index;
-    if (depth <= num_of_groups * groups_size)
-        group_index = std::ceil(static_cast<double>(depth) / groups_size) - 1;
-    else
-        group_index = num_of_groups - 1;
+    int group_index = get_bucket_index(depth);
 
     for (int i = memory_allocators.size() - 1; i > 0; --i)
     {
@@ -279,12 +277,13 @@ bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit,
 
 bool History_Table::free_subtable_memory(float *mem_limit)
 {
-    std::unique_lock<std::mutex> lock(mtx);  // Lock for the entire function to synchronize threads
+    std::unique_lock<std::mutex> lock(mtx); // Lock for the entire function to synchronize threads
 
     for (int i = memory_allocators.size() - 1; i >= 0; --i)
     {
         // Wait until no thread is working
-        cv.wait(lock, [] { return !is_working; });
+        cv.wait(lock, []
+                { return !is_working; });
 
         current_size = total_ram - get_free_mem();
         if (current_size >= *mem_limit * max_size && i == 0)
@@ -304,14 +303,14 @@ bool History_Table::free_subtable_memory(float *mem_limit)
             // cout << "locking the group\n";
             group_locks[i].lock();
             is_working = true;
-            lock.unlock();  // Unlock the main mutex to allow other threads to enter wait state
+            lock.unlock(); // Unlock the main mutex to allow other threads to enter wait state
 
             current_size = total_ram - get_free_mem();
             if (current_size < *mem_limit * max_size)
             {
                 is_working = false;
                 group_locks[i].unlock();
-                cv.notify_all();  // Notify other waiting threads
+                cv.notify_all(); // Notify other waiting threads
                 return true;
             }
 
@@ -340,12 +339,12 @@ bool History_Table::free_subtable_memory(float *mem_limit)
                 cout << "\n";
                 is_working = false;
                 group_locks[i].unlock();
-                cv.notify_all();  // Notify other waiting threads
+                cv.notify_all(); // Notify other waiting threads
                 return true;
             }
             group_locks[i].unlock();
             is_working = false;
-            cv.notify_all();  // Notify other waiting threads
+            cv.notify_all(); // Notify other waiting threads
         }
     }
     return (current_size < *mem_limit * max_size);
@@ -393,4 +392,20 @@ void History_Table::track_entries_and_references()
         cout << "Total Entries Single Table " << i << ": " << total_entries_single_table[i] << endl;
         cout << "Total References Single Table " << i << ": " << total_references_single_table[i] << endl;
     }
+}
+
+int History_Table::get_bucket_index(int depth)
+{
+    if (depth == gp_depth)
+        return 0;
+    else if (depth <= num_of_groups * groups_size + gp_depth)
+        return std::ceil(static_cast<double>(depth - gp_depth) / groups_size) - 1;
+    else
+        return num_of_groups - 1;
+}
+
+void History_Table::update_gp_depth(int depth)
+{
+    cout << "Global pool entry depth = " << depth << endl;
+    gp_depth = depth;
 }
