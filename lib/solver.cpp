@@ -398,8 +398,8 @@ void solver::solve(string f_name, int thread_num)
     // history_table.track_entries_and_references();
 
     /** uncomment the code below to find the work done in the global pool
-cout << "gp const: " << gp_const << "\n";
-cout << "gp temp: " << gp_complete << "\n";
+    cout << "gp const: " << gp_const << "\n";
+    cout << "gp temp: " << gp_complete << "\n";
 
     long double total_work_done = 0; // work done in threads  // thread - work remaining
     long double total_work_rem = 0;
