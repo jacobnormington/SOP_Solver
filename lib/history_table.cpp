@@ -254,7 +254,18 @@ bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit,
             cout << "Blocking insertion in bucket: " << i + 1 << " when the mem limit is: " << *updated_mem_limit << std::endl;
             blocked_groups[i] = true;
             *is_all_table_blocked = (i == 1);
-            *updated_mem_limit += 0.1f;
+
+            /**
+             * when the global pool is empty, we are updating the memory limit to 0.9
+             * and to prevent updating the memory limit to greater than 0.9
+             *
+             * mem_limit was 0.7, so we are updating limit to 0.8
+             * global pool is empty, so we are updating the memory limit to 0.9 (most recent limit)
+             * max(limit, updated_mem_limit) = will return the most updated memory limit
+             * min(0.9, max(limit, updated_mem_limit)) = will make sure that limit should not exceed 0.9
+             */
+            float limit = *updated_mem_limit + 0.1f;
+            *updated_mem_limit = min(0.9f, max(limit, *updated_mem_limit));
             cout << "Updated memory limit: " << *updated_mem_limit << std::endl;
 
             // for (int j = memory_allocators.size() - 1; j >= 0; --j)
@@ -268,7 +279,6 @@ bool History_Table::check_and_manage_memory(int depth, float *updated_mem_limit,
         group_locks[i].unlock();
     }
     return blocked_groups[group_index];
-    ;
 }
 
 bool History_Table::free_subtable_memory(float *mem_limit)
@@ -282,12 +292,26 @@ bool History_Table::free_subtable_memory(float *mem_limit)
                 { return !is_working; });
 
         current_size = total_ram - get_free_mem();
+
+        /**
+         * if i == 0, we don't have anything left to clear out
+         * but to block the last bucket
+         */
         if (current_size >= *mem_limit * max_size && i == 0)
         {
-            blocked_groups[i] = true;
+            /**
+             * when our global pool is empty and our history_table size is 3
+             * we are calling this function to block the last bucket
+             * since our history_pool size is 3, we are blocking the last bucket only
+             * we need to block all of them, that's why we are running a loop again to make sure all the groups are blocked
+             */
+            for (int j = blocked_groups.size() - 1; j >= 0; --j)
+                blocked_groups[j] = true;
+
             print_curmem();
             // if i == 0 is true, we don't have anything left to clear out except
             // the last remaining bucket that's why we always return false here
+
             return false;
         }
         if (current_size < *mem_limit * max_size)

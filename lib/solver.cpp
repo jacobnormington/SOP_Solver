@@ -427,7 +427,6 @@ void solver::solve(string f_name, int thread_num)
     std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
               << std::endl;
 
-*/
     /** uncomment to print the pruning happening at each level
     // Print the data at each index
     int total = 0;
@@ -832,11 +831,15 @@ void solver::enumerate()
                             push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
                         else if (number_of_groups == 1)
                         {
+                            /**
+                             * if number of groups is 1, we want to ignore the blocking and the deleting of the history table
+                             * by calling free_subtable_memory function, we are blocking the insertion of the history table
+                             */
+
                             history_table.free_subtable_memory(&mem_limit);
-                            // above function will not free any memory since we
-                            // only have one bucket, we just blocking insertion
-                            // by makking blocked_groups[0] = true;
-                            cout << "time is: " << main_timer.get_time_seconds() << endl;
+                            cout << "Blocking Insertion at time is: " << main_timer.get_time_seconds() << endl;
+
+                            /** to prevent further checking, we set limit_insertion to true */
                             limit_insertion = true;
                         }
                         else
@@ -860,6 +863,8 @@ void solver::enumerate()
                                     else
                                     {
                                         cout << "time is: " << main_timer.get_time_seconds() << endl;
+
+                                        /** to prevent further checking, we set limit_insertion to true */
                                         limit_insertion = true;
                                     }
                                 }
@@ -1512,8 +1517,19 @@ bool solver::workload_request()
             local_pools->set_pool_depth(thread_id, 0);
             global_pool.pop_back();
             if (global_pool.empty())
+            {
+                /**
+                 * if global pool is empty, we want to ignore the blocking & deletion of the table
+                 * updating the mem_limit to 0.9 (90% of the memory limit)
+                 *
+                 * updating the number of groups to 1 to treat the history table as a single subspace
+                 * and prevent the blocking and the deletion of the history table
+                 */
+                mem_limit = 0.9;
+                number_of_groups = 1;
+
                 cout << "GLOBAL POOL EMPTY" << endl;
-            // updating the variable to track how many of the threads completed the work assigned to them from the primary subspace
+            } // updating the variable to track how many of the threads completed the work assigned to them from the primary subspace
             gp_complete = global_pool.size();
             global_pool_lock.unlock();
             return true;
