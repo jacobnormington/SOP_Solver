@@ -1,5 +1,5 @@
 #include "solver.hpp"
-
+#include "LKH/LKH.h"
 extern "C"
 {
 #include "LKH/LKHmain.h"
@@ -124,6 +124,13 @@ bool BB_SolFound = false; // whether the current best solution was found by B&B,
 bool BB_Complete = false;
 bool local_searchinit = true;
 bool initial_LKHRun = true;
+
+// below variables is for sharing LKH best tour
+int *localBestTour = nullptr;
+pthread_mutex_t PrintLock = PTHREAD_MUTEX_INITIALIZER; // Lock for BestTour and flag
+int best_cost_temp = INT_MAX;                          // Temporary variable to store best cost at the time of copying
+// bool isBestTourProcessed = false;                      // Flag to track if the BestTour has been handled
+
 pthread_mutex_t Sol_lock = PTHREAD_MUTEX_INITIALIZER;
 /////////////////////////////////////////
 
@@ -282,6 +289,9 @@ void solver::solve(string f_name, int thread_num)
     }
     pre_density = float(transitive_closure(dependency_graph)) / float((instance_size) * (instance_size - 1));
     std::cout << "Precedance Density = " << pre_density << std::endl;
+
+    // initating variable to get LKH best tour path
+    localBestTour = new int[instance_size];
 
     // local_pool_config(float((instance_size - 1)*(instance_size-2))/float(total_edges));
 
@@ -742,10 +752,179 @@ void solver::solve_parallel()
     return;
 }
 
+/**
+ * @brief Process the best tour found by LKH and print it if it has not been processed yet.
+ *
+ * This function is called by each thread to process the best tour found by LKH. If the best cost has changed,
+ * it means a new tour has been found and it needs to be processed. The best tour is copied to a local variable
+ * and the flag isBestTourProcessed is set to true to mark it as processed. The local copy of the tour is then
+ * processed outside the critical section. If the best cost has not changed, it means the tour has already been
+ * processed by another thread and a message is printed to indicate that.
+ */
+
+// void solver::processBestTour()
+// {
+
+//     // No need to lock BestTourLock until we need to check the flag
+//     // Only proceed if BB_SolFound is false
+//     if (BestCost > 0 && BestCost <= best_cost)
+//     {
+//         cout << "intiating localbest tour" << endl;
+//         int *localBestTour = nullptr;
+//         // cout << "started processBestTour by thread : " << thread_id << " = " << endl;
+//         // Lock Sol_lock to ensure LKH is not updating BestTour while we're copying it
+//         pthread_mutex_lock(&Sol_lock);
+//         if (BB_SolFound)
+//         {
+//             pthread_mutex_unlock(&Sol_lock);
+//             return;
+//         }
+//         // Check if the best cost has changed, meaning a new tour has been found
+//         if (BestCost < best_cost_temp)
+//         {
+//             cout << "updating best cost temp" << endl;
+//             // Update temporary cost and reset flag so this tour gets printed
+//             best_cost_temp = BestCost;
+//             isBestTourProcessed = false;
+//         }
+
+//         // If the best tour is not processed yet, process it
+//         if (!isBestTourProcessed)
+//         {
+//             // cout << "Best Cost----: " << BestCost << endl;
+//             // cout << "Dimension: " << Dimension << endl;
+//             // cout << "instance_size: " << instance_size << endl;
+
+//             // Copy BestTour to a local variable
+//             // pthread_mutex_lock(&PrintLock);
+
+//             localBestTour = new int[instance_size]; // Create a local copy of the tour
+//             for (int i = 1; i <= instance_size; i++)
+//             {
+//                 localBestTour[i] = BestTour[i]; // Copy the tour
+//             }
+
+//             // pthread_mutex_unlock(&PrintLock);
+
+//             // for (int i = 1; i <= instance_size; i++)
+//             // {
+//             //     std::cout << localBestTour[i] << " ";
+//             // }
+//             // std::cout << std::endl;
+
+//             // Mark BestTour as processed
+//             isBestTourProcessed = true;
+//         }
+
+//         // Unlock Sol_lock after copying BestTour and best_cost
+//         pthread_mutex_unlock(&Sol_lock);
+
+//         // Now use the PrintLock to ensure only one thread prints the tour at a time
+//         // pthread_mutex_lock(&PrintLock);
+//         // Process the local copy of BestTour outside the critical section
+//         if (localBestTour != nullptr)
+//         {
+//             cout << "starting printing best tour by thread : " << thread_id << endl;
+//             if (best_cost_temp == BestCost)
+//             {
+//                 std::cout << "Processing Best Tour with cost: " << best_cost_temp << std::endl;
+//                 for (int i = 1; i <= instance_size; i++)
+//                 {
+//                     std::cout << localBestTour[i] << " ";
+//                 }
+//                 std::cout << std::endl;
+//             }
+//             else
+//             {
+//                 // The tour is outdated, a better one was found
+//                 std::cout << "The best cost has changed, a new tour has been found." << std::endl;
+//             }
+//             // Clean up the local copy
+
+//             cout << "start cleaning up the local copy" << endl;
+//             delete[] localBestTour;
+//             cout << "cleaned up the local copy" << endl;
+//         }
+//         else
+//             std::cout << "Best tour has already been processed by another thread: " << thread_id << std::endl;
+
+//         // Release the PrintLock after printing
+//         // pthread_mutex_unlock(&PrintLock);
+//     }
+// }
+
+void solver::processBestTour()
+{
+    if (best_cost_temp == best_cost)
+    {
+        pthread_mutex_lock(&PrintLock);
+        // Lock Sol_lock to safely copy BestTour
+        pthread_mutex_lock(&Sol_lock);
+
+        cout << "intiating localbest tour" << endl;
+        // Initialize variables for cost calculations
+        int total_cost = best_cost_temp;
+        int prefix_cost = 0;    // This will accumulate the cost of the prefix
+        int remaining_cost = total_cost;    // Remaining cost, initially equals total cost
+
+        int cost = best_cost_temp;
+        if (BB_SolFound)
+        {
+            pthread_mutex_unlock(&Sol_lock);
+            pthread_mutex_unlock(&PrintLock);
+            return;
+        }
+
+        for (int i = 1; i <= instance_size; i++)
+        {
+            localBestTour[i] = BestTour[i]; // Copy the tour
+        }
+        BB_SolFound = true;
+
+        // Release Sol_lock after copying
+        pthread_mutex_unlock(&Sol_lock);
+        // Now print the copied tour
+        if (localBestTour != nullptr)
+        {
+            std::cout << "Processing Best Tour with cost: " << best_cost_temp << std::endl;
+            std::cout << "Prefix Path and Costs:" << std::endl;
+
+            for (int i = 1; i < instance_size; i++) // Iterate through the path
+            {
+                int src = localBestTour[i];
+                int dst = localBestTour[i+1];
+                
+                prefix_cost += cost_graph[src - 1][dst - 1].weight;
+                remaining_cost = total_cost - prefix_cost;
+
+                // Print prefix path and costs
+                std::cout << "Prefix Path (" << src << ", " << dst << "): ";
+                for (int j = 1; j <= i; j++)
+                {
+                    std::cout << localBestTour[j] << " ";
+                }
+                std::cout << "| Prefix Cost: " << prefix_cost 
+                            << " | Remaining Cost: " << remaining_cost << std::endl;
+            }
+        }
+        else
+        {
+            std::cout << "Failed to copy BestTour." << std::endl;
+        }
+        best_cost_temp = INT_MAX;
+        cout << "Unlocked the PrintLock" << endl;
+        pthread_mutex_unlock(&PrintLock);
+    }
+}
+
 void solver::enumerate()
 {
     while (!time_out)
     {
+        if (main_timer.get_time_seconds() > 60 && best_cost_temp != INT_MAX && !BB_SolFound)
+        {
+            processBestTour();
+        }
         // if (main_timer.get_time_seconds() > 3598)
         //     local_pools->print_top_sequence_sizes_end(thread_total);
 
@@ -801,6 +980,7 @@ void solver::enumerate()
                                     BB_SolFound = true;
                                 }
 
+                                best_cost_temp = INT_MAX;
                                 // DIAGNOSTIC: best cost
                                 std::cout << "Best Cost = " << best_cost << " Found in Thread " << thread_id; // TODO: add toggle
                                 std::cout << " at time = " << main_timer.get_time_seconds() << std::endl;
@@ -1482,9 +1662,9 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
 void solver::push_to_history_table(Key &key, int lower_bound, HistoryNode **entry, bool backtracked)
 {
     if (entry == NULL)
-        history_table.insert(key, problem_state.current_cost, lower_bound, thread_id, backtracked, problem_state.current_path.size(), instance_size / 3);
+        history_table.insert(key, problem_state.current_cost, lower_bound, thread_id, backtracked, problem_state.current_path.size(), instance_size / number_of_groups);
     else
-        *entry = history_table.insert(key, problem_state.current_cost, lower_bound, thread_id, backtracked, problem_state.current_path.size(), instance_size / 3);
+        *entry = history_table.insert(key, problem_state.current_cost, lower_bound, thread_id, backtracked, problem_state.current_path.size(), instance_size / number_of_groups);
     return;
 }
 

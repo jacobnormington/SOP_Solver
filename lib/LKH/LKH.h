@@ -82,6 +82,7 @@ extern pthread_mutex_t Sol_lock;
 extern int best_cost;
 extern int* bestBB_tour;
 extern bool BB_Complete;
+extern int best_cost_temp;
 extern bool BB_SolFound;
 
 /* The Node structure is used to represent nodes (cities) of the problem */

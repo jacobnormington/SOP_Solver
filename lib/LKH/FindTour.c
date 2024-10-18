@@ -29,29 +29,31 @@ GainType FindTour()
     do
         t->OldPred = t->OldSuc = t->NextBestSuc = t->BestSuc = 0;
     while ((t = t->Suc) != FirstNode);
-    if (Run == 1 && Dimension == DimensionSaved) {
+    if (Run == 1 && Dimension == DimensionSaved)
+    {
         OrdinalTourCost = 0;
         for (i = 1; i < Dimension; i++)
-            OrdinalTourCost += C(&NodeSet[i], &NodeSet[i + 1])
-                - NodeSet[i].Pi - NodeSet[i + 1].Pi;
-        OrdinalTourCost += C(&NodeSet[Dimension], &NodeSet[1])
-            - NodeSet[Dimension].Pi - NodeSet[1].Pi;
+            OrdinalTourCost += C(&NodeSet[i], &NodeSet[i + 1]) - NodeSet[i].Pi - NodeSet[i + 1].Pi;
+        OrdinalTourCost += C(&NodeSet[Dimension], &NodeSet[1]) - NodeSet[Dimension].Pi - NodeSet[1].Pi;
         OrdinalTourCost /= Precision;
     }
     BetterCost = PLUS_INFINITY;
     BetterPenalty = CurrentPenalty = PLUS_INFINITY;
     if (MaxTrials > 0)
         HashInitialize(HTable);
-    else {
+    else
+    {
         Trial = 1;
         ChooseInitialTour();
         CurrentPenalty = PLUS_INFINITY;
         CurrentPenalty = BetterPenalty = Penalty ? Penalty() : 0;
     }
-    for (Trial = 0; Trial <= MaxTrials; Trial++) {
-        if (BB_Complete || GetTime() - StartTime >= TimeLimit) {
-            //if (TraceLevel >= 1)
-            //    printff("*** Time limit exceeded ***\n");
+    for (Trial = 0; Trial <= MaxTrials; Trial++)
+    {
+        if (BB_Complete || GetTime() - StartTime >= TimeLimit)
+        {
+            // if (TraceLevel >= 1)
+            //     printff("*** Time limit exceeded ***\n");
             break;
         }
         /* Choose FirstNode at random */
@@ -65,14 +67,17 @@ GainType FindTour()
             (InitialTourAlgorithm != SOP_ALG || Trial > 1))
             SOP_RepairTour();
         Cost = LinKernighan();
-        if (FirstNode->BestSuc && !TSPTW_Makespan) {
+        if (FirstNode->BestSuc && !TSPTW_Makespan)
+        {
             /* Merge tour with current best tour */
             t = FirstNode;
-            while ((t = t->Next = t->BestSuc) != FirstNode);
+            while ((t = t->Next = t->BestSuc) != FirstNode)
+                ;
             Cost = MergeWithTour();
         }
         if (Dimension == DimensionSaved && Cost >= OrdinalTourCost &&
-            BetterCost > OrdinalTourCost && !TSPTW_Makespan) {
+            BetterCost > OrdinalTourCost && !TSPTW_Makespan)
+        {
             /* Merge tour with ordinal tour */
             for (i = 1; i < Dimension; i++)
                 NodeSet[i].Next = &NodeSet[i + 1];
@@ -80,20 +85,47 @@ GainType FindTour()
             Cost = MergeWithTour();
         }
         if (CurrentPenalty < BetterPenalty ||
-            (CurrentPenalty == BetterPenalty && Cost < BetterCost)) {
+            (CurrentPenalty == BetterPenalty && Cost < BetterCost))
+        {
 
             /* Cost Sharing With B&B solver */
-            if (Cost < best_cost) {
+            if (Cost < best_cost)
+            {
                 pthread_mutex_lock(&Sol_lock);
                 best_cost = Cost;
                 printf("Best Cost = %lld Found by LKH in trail %d\n", Cost, Trial);
+                best_cost_temp = best_cost;
                 BB_SolFound = false;
+                printf("Best Cost temp = %lld updated by LKH \n", best_cost_temp);
+                RecordBetterTour();
+                RecordBestTour();
+
+                // printf("Best tour path:\n");
+                // for (int i = 1; i <= Dimension; i++) {
+                //     // Node *node = &NodeSet[BestTour[i]];
+                //     // printf("Node %d (%.2f, %.2f) ", node->Id, node->X, node->Y);
+                //     printf("%d ", BestTour[i]);
+                // }
+                // printf("\n");
+                // printf("Best Cost = %lld\n", (long long)best_cost);
+                // printf("Dimension = %d\n", Dimension);
+                // printf("Best tour path:\n");
+                // if (BestTour == NULL) {
+                //     printf("BestTour is NULL\n");
+                //     return;
+                // }
+                // for (int i = 1; i <= Dimension; i++) {
+                //     printf("%d ", BestTour[i]);
+                //     // if (i % 20 == 0) printf("\n");  // Line break every 20 numbers for readability
+                // }
+                // printf("\n");
                 pthread_mutex_unlock(&Sol_lock);
             }
 
-            if (TraceLevel >= 1) {
-                //printff("* %d: ", Trial);
-                //StatusReport(Cost, EntryTime, "");
+            if (TraceLevel >= 1)
+            {
+                // printff("* %d: ", Trial);
+                // StatusReport(Cost, EntryTime, "");
             }
             BetterCost = Cost;
             BetterPenalty = CurrentPenalty;
@@ -102,57 +134,68 @@ GainType FindTour()
             if (BetterPenalty < BestPenalty ||
                 (BetterPenalty == BestPenalty && BetterCost < BestCost))
                 WriteTour(OutputTourFileName, BetterTour, BetterCost);
-            if (StopAtOptimum) {
+            if (StopAtOptimum)
+            {
                 if (ProblemType != CCVRP && ProblemType != TRP &&
-                    ProblemType != MLP &&
-                    MTSPObjective != MINMAX &&
-                    MTSPObjective != MINMAX_SIZE ?
-                    CurrentPenalty == 0 && Cost == Optimum :
-                    CurrentPenalty == Optimum)
+                            ProblemType != MLP &&
+                            MTSPObjective != MINMAX &&
+                            MTSPObjective != MINMAX_SIZE
+                        ? CurrentPenalty == 0 && Cost == Optimum
+                        : CurrentPenalty == Optimum)
                     break;
             }
             AdjustCandidateSet();
             HashInitialize(HTable);
             HashInsert(HTable, Hash, Cost);
-        } else if (TraceLevel >= 2) {
-            //printff("  %d: ", Trial);
-            //StatusReport(Cost, EntryTime, "");
+        }
+        else if (TraceLevel >= 2)
+        {
+            // printff("  %d: ", Trial);
+            // StatusReport(Cost, EntryTime, "");
         }
         /* Record backbones if wanted */
-        if (Trial <= BackboneTrials && BackboneTrials < MaxTrials) {
+        if (Trial <= BackboneTrials && BackboneTrials < MaxTrials)
+        {
             SwapCandidateSets();
             AdjustCandidateSet();
-            if (Trial == BackboneTrials) {
-                if (TraceLevel >= 1) {
+            if (Trial == BackboneTrials)
+            {
+                if (TraceLevel >= 1)
+                {
                     /*
                     printff("# %d: Backbone candidates ->\n", Trial);
                     CandidateReport();
                     */
                 }
-            } else
+            }
+            else
                 SwapCandidateSets();
         }
     }
-    
-    if (BackboneTrials > 0 && BackboneTrials < MaxTrials) {
+
+    if (BackboneTrials > 0 && BackboneTrials < MaxTrials)
+    {
         if (Trial > BackboneTrials ||
             (Trial == BackboneTrials &&
              (!StopAtOptimum || BetterCost != Optimum)))
             SwapCandidateSets();
         t = FirstNode;
-        do {
+        do
+        {
             free(t->BackboneCandidateSet);
             t->BackboneCandidateSet = 0;
         } while ((t = t->Suc) != FirstNode);
     }
     t = FirstNode;
-    if (Norm == 0 || MaxTrials == 0 || !t->BestSuc) {
+    if (Norm == 0 || MaxTrials == 0 || !t->BestSuc)
+    {
         do
             t = t->BestSuc = t->Suc;
         while (t != FirstNode);
     }
     Hash = 0;
-    do {
+    do
+    {
         (t->Suc = t->BestSuc)->Pred = t;
         Hash ^= Rand[t->Id] * Rand[t->Suc->Id];
     } while ((t = t->BestSuc) != FirstNode);
@@ -170,7 +213,8 @@ GainType FindTour()
 static void SwapCandidateSets()
 {
     Node *t = FirstNode;
-    do {
+    do
+    {
         Candidate *Temp = t->CandidateSet;
         t->CandidateSet = t->BackboneCandidateSet;
         t->BackboneCandidateSet = Temp;

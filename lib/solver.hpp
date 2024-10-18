@@ -137,6 +137,8 @@ private:
     /* Returns true if any sop_state in the container has a depth different than any other, false otherwise. Used for initial splitting in solve_parallel. */
     bool split_level_check(deque<sop_state> *solver_container);
 
+    /* To process the best tour path provided by LKH */
+    void processBestTour();
     /* Recursive function that each thread runs to process its assigned spaces of the enumeration tree, checking one node and then its children and their children, etc. */
     void enumerate();
     /* Check the next node before enumeration, and discard it if invalid. Includes its own progress tracking.
