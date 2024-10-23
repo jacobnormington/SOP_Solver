@@ -927,22 +927,47 @@ void solver::processBestTour()
         // Ensure the tour starts from node 1
         rotateTourToStartFromNode1(localBestTour, instance_size);
 
-        for (int i = 0; i < instance_size; i++) // Iterate through the path
-        {
-            int src = localBestTour[i];
-            int dst = localBestTour[i + 1];
+        // Now, check the prefix paths in the history table
+        boost::dynamic_bitset<> bit_vector(instance_size, false); // Initialize the key bitset
 
-            prefix_cost += cost_graph[src - 1][dst - 1].weight;
+        for (int i = 0; i < instance_size - 4; i++) // Iterate through the path
+        {
+            int src = localBestTour[i] - 1;
+            int dst = localBestTour[i + 1] - 1;
+
+            // Update the key for the current prefix path
+            bit_vector[src] = true; // Mark the current node as visited in the bitset
+
+            prefix_cost += cost_graph[src][dst].weight;
             remaining_cost = total_cost - prefix_cost;
 
-            // Print prefix path and costs
-            std::cout << "Prefix Path (" << src << ", " << dst << "): ";
-            for (int j = 0; j <= i; j++)
+            // Create the key with the size of the current prefix path
+            pair<boost::dynamic_bitset<>, int> prefixKey = make_pair(bit_vector, src); // The second element is the last element of the prefix
+
+            // Check if this key exists in the history table
+            HistoryNode *history_node = history_table.retrieve(prefixKey, i + 1); // i start from 0
+
+            if (history_node != NULL)
             {
-                std::cout << localBestTour[j] << " ";
+                HistoryContent content = history_node->entry.load();
+
+                // Compare the prefix cost with the stored cost in the history table
+                if (content.prefix_cost > prefix_cost)
+                {
+                    std::cout << "Prefix path (" << src << " to " << dst << ") is better than history. Current Cost: "
+                              << prefix_cost << ", History Cost: " << content.prefix_cost << std::endl;
+                    content.prefix_cost = prefix_cost; // Update the cost in the history table
+                }
+                // else
+                // {
+                //     std::cout << "Prefix path (" << src << " to " << dst << ") is worse than history. Current Cost: "
+                //               << prefix_cost << ", History Cost: " << content.prefix_cost << std::endl;
+                // }
             }
-            std::cout << "| Prefix Cost: " << prefix_cost
-                      << " | Remaining Cost: " << remaining_cost << std::endl;
+            // else
+            // {
+            //     std::cout << "Prefix path (" << src << " to " << dst << ") not found in the history table." << std::endl;
+            // }
         }
 
         best_cost_temp = INT_MAX;

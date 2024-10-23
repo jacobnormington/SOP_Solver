@@ -185,6 +185,8 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
 
 HistoryNode *History_Table::retrieve(Key &key, int depth)
 {
+    if (depth < gp_depth)
+        return NULL;
     int group_index = get_bucket_index(depth);
 
     if (!is_data_available[group_index])
@@ -416,7 +418,7 @@ void History_Table::track_entries_and_references()
 
 int History_Table::get_bucket_index(int depth)
 {
-    if (depth == gp_depth)
+    if (depth <= gp_depth)
         return 0;
     else if (depth <= num_of_groups * groups_size + gp_depth)
         return std::ceil(static_cast<double>(depth - gp_depth) / groups_size) - 1;
