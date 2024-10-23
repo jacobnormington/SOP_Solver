@@ -126,7 +126,6 @@ bool local_searchinit = true;
 bool initial_LKHRun = true;
 
 // below variables is for sharing LKH best tour
-int *localBestTour = nullptr;
 pthread_mutex_t PrintLock = PTHREAD_MUTEX_INITIALIZER; // Lock for BestTour and flag
 int best_cost_temp = INT_MAX;                          // Temporary variable to store best cost at the time of copying
 // bool isBestTourProcessed = false;                      // Flag to track if the BestTour has been handled
@@ -289,9 +288,6 @@ void solver::solve(string f_name, int thread_num)
     }
     pre_density = float(transitive_closure(dependency_graph)) / float((instance_size) * (instance_size - 1));
     std::cout << "Precedance Density = " << pre_density << std::endl;
-
-    // initating variable to get LKH best tour path
-    localBestTour = new int[instance_size];
 
     // local_pool_config(float((instance_size - 1)*(instance_size-2))/float(total_edges));
 
@@ -853,6 +849,46 @@ void solver::solve_parallel()
 //     }
 // }
 
+void rotateTourToStartFromNode1(int *tour, int size)
+{
+    int start_index = 0;
+
+    // Find the index where node 1 is located
+    for (int i = 0; i <= size; i++)
+    {
+        if (tour[i] == 1)
+        {
+            start_index = i;
+            break;
+        }
+    }
+
+    // If the tour is already starting from node 1, no need to rotate
+    if (start_index == 0)
+        return;
+
+    // Create a temporary array to store the rotated tour
+    int *rotatedTour = new int[size + 1]; // +1 because tours are 1-indexed
+
+    // Rotate the tour so that it starts from node 1
+    int j = 0;
+    for (int i = start_index; i <= size; i++, j++)
+    {
+        rotatedTour[j] = tour[i];
+    }
+    for (int i = 0; i < start_index; i++, j++)
+    {
+        rotatedTour[j] = tour[i];
+    }
+
+    // Copy the rotated tour back to the original tour
+    for (int i = 0; i <= size; i++)
+    {
+        tour[i] = rotatedTour[i];
+    }
+
+    delete[] rotatedTour; // Clean up temporary array
+}
 void solver::processBestTour()
 {
     if (best_cost_temp == best_cost)
@@ -862,12 +898,7 @@ void solver::processBestTour()
         pthread_mutex_lock(&Sol_lock);
 
         cout << "intiating localbest tour" << endl;
-        // Initialize variables for cost calculations
-        int total_cost = best_cost_temp;
-        int prefix_cost = 0;    // This will accumulate the cost of the prefix
-        int remaining_cost = total_cost;    // Remaining cost, initially equals total cost
 
-        int cost = best_cost_temp;
         if (BB_SolFound)
         {
             pthread_mutex_unlock(&Sol_lock);
@@ -875,42 +906,45 @@ void solver::processBestTour()
             return;
         }
 
-        for (int i = 1; i <= instance_size; i++)
-        {
+        // Initialize variables for cost calculations
+        int total_cost = best_cost_temp;
+        int prefix_cost = 0;             // This will accumulate the cost of the prefix
+        int remaining_cost = total_cost; // Remaining cost, initially equals total cost
+        int *localBestTour = new int[instance_size + 1];
+
+        for (int i = 0; i <= instance_size; i++)
             localBestTour[i] = BestTour[i]; // Copy the tour
-        }
+
         BB_SolFound = true;
 
         // Release Sol_lock after copying
         pthread_mutex_unlock(&Sol_lock);
         // Now print the copied tour
-        if (localBestTour != nullptr)
-        {
-            std::cout << "Processing Best Tour with cost: " << best_cost_temp << std::endl;
-            std::cout << "Prefix Path and Costs:" << std::endl;
 
-            for (int i = 1; i < instance_size; i++) // Iterate through the path
+        std::cout << "Processing Best Tour with cost: " << best_cost_temp << std::endl;
+        std::cout << "Prefix Path and Costs:" << std::endl;
+
+        // Ensure the tour starts from node 1
+        rotateTourToStartFromNode1(localBestTour, instance_size);
+
+        for (int i = 0; i < instance_size; i++) // Iterate through the path
+        {
+            int src = localBestTour[i];
+            int dst = localBestTour[i + 1];
+
+            prefix_cost += cost_graph[src - 1][dst - 1].weight;
+            remaining_cost = total_cost - prefix_cost;
+
+            // Print prefix path and costs
+            std::cout << "Prefix Path (" << src << ", " << dst << "): ";
+            for (int j = 0; j <= i; j++)
             {
-                int src = localBestTour[i];
-                int dst = localBestTour[i+1];
-                
-                prefix_cost += cost_graph[src - 1][dst - 1].weight;
-                remaining_cost = total_cost - prefix_cost;
-
-                // Print prefix path and costs
-                std::cout << "Prefix Path (" << src << ", " << dst << "): ";
-                for (int j = 1; j <= i; j++)
-                {
-                    std::cout << localBestTour[j] << " ";
-                }
-                std::cout << "| Prefix Cost: " << prefix_cost 
-                            << " | Remaining Cost: " << remaining_cost << std::endl;
+                std::cout << localBestTour[j] << " ";
             }
+            std::cout << "| Prefix Cost: " << prefix_cost
+                      << " | Remaining Cost: " << remaining_cost << std::endl;
         }
-        else
-        {
-            std::cout << "Failed to copy BestTour." << std::endl;
-        }
+
         best_cost_temp = INT_MAX;
         cout << "Unlocked the PrintLock" << endl;
         pthread_mutex_unlock(&PrintLock);
