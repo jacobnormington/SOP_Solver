@@ -117,7 +117,7 @@ void History_Table::print_curmem()
     return;
 }
 
-HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth, int temp_group_size)
+HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth, int temp_group_size, bool is_best_suffix)
 {
     int group_index = get_bucket_index(depth);
 
@@ -159,6 +159,7 @@ HistoryNode *History_Table::insert(Key &key, int prefix_cost, int lower_bound, u
     node->explored = backtracked;
     node->entry.store({prefix_cost, lower_bound});
     node->active_threadID = thread_id;
+    node->is_best_suffix = is_best_suffix;
     // node->level = index;
     // node->depth = depth;
     // node->usage_cnt = 0;

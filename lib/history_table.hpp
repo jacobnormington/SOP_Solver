@@ -96,7 +96,7 @@ public:
         backtracked - whether the subspace under this node has already been explored
         depth - the depth of this node (size of the current partial path)
         Return- a pointer to the node created */
-    HistoryNode *insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth, int temp_group_size);
+    HistoryNode *insert(Key &key, int prefix_cost, int lower_bound, unsigned thread_id, bool backtracked, unsigned depth, int temp_group_size, bool is_best_suffix);
     /* Find a history table entry based on a specific key.
         key - the history key corresponding to the partial path this entry represents
         Return- a pointer to the node found, if any */

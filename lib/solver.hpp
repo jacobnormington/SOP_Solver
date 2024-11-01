@@ -161,13 +161,13 @@ private:
         entry - a return variable, a pointer to the history node corresponding to this path
         cost - the cost of the current path
         Return - true if this node still needs to be processed, false if it should be pruned */
-    bool history_utilization(Key &key, int cost, int *lowerbound, bool *found, HistoryNode **entry);
+    bool history_utilization(Key &key, int cost, int *lowerbound, bool *found, HistoryNode **entry, int source, int destination);
     /* Add a new entry to the history table.
         key - the history key corresponding to the partial path this entry represents
         lower_bound - the lower bound cost of a complete solution beginning with this path
         entry - a return variable, holds a pointer to the entry created, unless NULL is passed
         backtracked - if the subtree under this node has already been fully explored */
-    void push_to_history_table(Key &key, int lower_bound, HistoryNode **entry, bool backtracked);
+    void push_to_history_table(Key &key, int lower_bound, HistoryNode **entry, bool backtracked, bool is_best_suffix);
 
     /* returns true on success */
     bool workload_request();
