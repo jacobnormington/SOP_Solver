@@ -156,8 +156,8 @@ bool global_pool_sort(const path_node &src, const path_node &dest) { return src.
 // sort by decreasing lower bound (back is the best)
 bool local_pool_sort(const path_node &src, const path_node &dest) { return src.lower_bound > dest.lower_bound; }
 
-static double gp_const;    // store the total work in the global pool initially
-static double gp_complete; // variable to store the number of remaining work from global pool
+static double gp_const;     // store the total work in the global pool initially
+static double gp_remaining; // variable to store the number of remaining work from global pool
 
 void lkh()
 {
@@ -256,6 +256,34 @@ void solver::assign_parameter(vector<string> setting)
     return;
 }
 
+void print_workdone()
+{
+    cout << "gp const: " << gp_const << "\n";
+    cout << "gp remaining: " << gp_remaining << "\n";
+
+    long double total_work_done = 0; // work done in threads  // thread - work remaining
+    long double total_work_rem = 0;
+
+    // Calculate the total remaining work
+    for (const auto &work : work_remaining)
+    {
+        total_work_done += (1 - (static_cast<long double>(work.load()) / ULLONG_MAX));
+        total_work_rem += (static_cast<long double>(work.load()) / ULLONG_MAX);
+    }
+
+    std::cout << "Total Work done in threads: " << total_work_done << std::endl;
+    std::cout << "Total Work remaining in threads: " << total_work_rem << std::endl;
+
+    long double total_global_work_done = 0;
+    // Total global work done
+
+    total_global_work_done = gp_const - gp_remaining - 31 + total_work_done;
+
+    std::cout << "Total global work done: " << total_global_work_done << std::endl;
+    // Calculate the percentage of work done
+    long double percentage_done = (total_global_work_done / gp_const) * 100;
+    std::cout << "Percentage of work done: " << percentage_done << "%" << std::endl;
+}
 void solver::solve(string f_name, int thread_num)
 {
     if (thread_num < 1)
@@ -386,7 +414,7 @@ void solver::solve(string f_name, int thread_num)
     double percent_time_active = (((double)total_time / 1000000) * 32 - time_workstealing) / ((double)total_time / 1000000 * 32);
     cout << "active time: " << percent_time_active << endl;
 
-    std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
+    std::cout << "best_cost: " << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
               << std::endl;
 
     for (int i = 0; i < steal_times.size(); i++)
@@ -394,38 +422,9 @@ void solver::solve(string f_name, int thread_num)
         cout << steal_times[i] << endl;
     }
 
+    print_workdone();
     // to count the number of entries at different level in history table and their references
     // history_table.track_entries_and_references();
-
-    /** uncomment the code below to find the work done in the global pool
-    cout << "gp const: " << gp_const << "\n";
-    cout << "gp temp: " << gp_complete << "\n";
-
-    long double total_work_done = 0; // work done in threads  // thread - work remaining
-    long double total_work_rem = 0;
-
-    // Calculate the total remaining work
-    for (const auto &work : work_remaining)
-    {
-        total_work_done += (1 - (static_cast<long double>(work.load()) / ULLONG_MAX));
-        total_work_rem += (static_cast<long double>(work.load()) / ULLONG_MAX);
-    }
-
-    std::cout << "Total Work done in threads: " << total_work_done << std::endl;
-    std::cout << "Total Work remaining in threads: " << total_work_rem << std::endl;
-
-    long double total_global_work_done = 0;
-    // Total global work done
-
-    total_global_work_done = gp_const - gp_complete - 31 + total_work_done;
-
-    std::cout << "Total global work done: " << total_global_work_done << std::endl;
-    // Calculate the percentage of work done
-    long double percentage_done = (total_global_work_done / gp_const) * 100;
-    std::cout << "Percentage of work done: " << percentage_done << "%" << std::endl;
-
-    std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
-              << std::endl;
 
     /** uncomment to print the pruning happening at each level
     // Print the data at each index
@@ -636,7 +635,7 @@ void solver::solve_parallel()
 
     history_table.update_gp_depth(global_pool.at(0).sequence.size());
     gp_const = global_pool.size();
-    gp_complete = global_pool.size();
+    gp_remaining = global_pool.size();
     // cout << "Setting the parameters to track the work done" << endl;
 
     delete solver_container;
@@ -1528,9 +1527,13 @@ bool solver::workload_request()
                 mem_limit = 0.9;
                 number_of_groups = 1;
 
-                cout << "GLOBAL POOL EMPTY" << endl;
+                cout << "GLOBAL POOL EMPTY at time: " << main_timer.get_time_seconds() << endl;
+                gp_remaining = global_pool.size();
+
+                // print_workdone();
+
             } // updating the variable to track how many of the threads completed the work assigned to them from the primary subspace
-            gp_complete = global_pool.size();
+            gp_remaining = global_pool.size();
             global_pool_lock.unlock();
             return true;
         }
