@@ -61,7 +61,7 @@ private:
     int insert_count;                   // a counter to ensure that, periodically, current_size is updated
 
     int num_of_groups; // the number of groups in history table
-    int groups_size;   // the size of each depth group
+    int groups_size;   // the node depth for insertion for each group
 
     vector<bool> blocked_groups;    // track which groups are blocked from insertions
     vector<bool> is_data_available; // tracks whether data is available in each subtable

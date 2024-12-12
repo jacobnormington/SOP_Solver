@@ -20,7 +20,7 @@ static int global_pool_size = 0; // Minimum size of the global pool at before en
 static float inhis_mem_limit = -1; // 0-1, the percentage of memory usage beyond which new entries shouldn't be added to the history table
 static float mem_limit = -1;       // 0-1, the percentage of memory usage beyond which we will start blocking new entries into the table
 static int number_of_groups = 1;
-static int group_size = 50;
+static int bucket_size = 0;
 static bool is_all_table_blocked = false;
 // static unsigned int inhis_depth = -1;           //after inhis_mem_limit exceeded, will still add an entry if the current depth is less than inhis_depth
 // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
@@ -29,6 +29,7 @@ static bool is_all_table_blocked = false;
 static bool enable_workstealing = false;
 static bool enable_threadstop = false;
 static bool enable_lkh = true;
+static bool enable_heuristic = false;
 // static bool enable_progress_estimation = false;
 
 // derived attributes
@@ -241,8 +242,9 @@ void solver::assign_parameter(vector<string> setting)
     number_of_groups = atoi(setting[12].c_str());
     std::cout << "Number of groups = " << number_of_groups << std::endl;
 
-    group_size = atoi(setting[13].c_str());
-    std::cout << "Group size in config = " << group_size << std::endl;
+    bucket_size = atoi(setting[13].c_str());
+    if (bucket_size > 0)
+        std::cout << "Group size in config = " << bucket_size << std::endl;
 
     if (number_of_groups - 1 >= 1)
         mem_limit = inhis_mem_limit - (number_of_groups - 1) * 0.1;
@@ -343,14 +345,26 @@ void solver::solve(string f_name, int thread_num)
             problem_state.depCnt[dependency_graph[i][k]]++;
         }
     }
-    group_size = instance_size / number_of_groups;
-    std::cout << "Group size after splitting instance size in 3 equal part = " << group_size << std::endl;
+
+    // we need to split the instance into 3 equal parts if the group size is 0 in the configuration file
+    if (bucket_size == 0)
+    {
+        bucket_size = instance_size / number_of_groups;
+        std::cout << "Group size after splitting instance size in 3 equal part = " << bucket_size << std::endl;
+    }
+    else if (bucket_size * (number_of_groups - 1) >= instance_size - 2)
+    {
+
+        cout << "Exiting the code. Invalid bucket size" << endl;
+        exit(EXIT_FAILURE);
+    }
+
     default_state = problem_state; // a copy of problem_state, since structs are passed by value
     std::cout << "Instance size is " << instance_size - 2 << std::endl;
 
     // thread_load = new load_stats [thread_total];
     local_pools = new local_pool(thread_total);
-    history_table.initialize(thread_total, TABLE_SIZE, number_of_groups, group_size);
+    history_table.initialize(thread_total, TABLE_SIZE, number_of_groups, bucket_size);
     // thread_requests.resize(thread_total);
     // for (int i = 0; i < thread_total; ++i)
     // {
@@ -856,12 +870,12 @@ void solver::enumerate()
                                     bool is_space_increased_or_available = history_table.free_subtable_memory(&mem_limit);
                                     if (is_space_increased_or_available)
                                     {
-                                        if (problem_state.current_path.size() <= group_size)
+                                        if (problem_state.current_path.size() <= bucket_size)
                                             push_to_history_table(problem_state.history_key, lower_bound, &his_node, false);
                                     }
                                     else
                                     {
-                                        cout << "time is: " << main_timer.get_time_seconds() << endl;
+                                        cout << "Blocking Insertion at time is: " << main_timer.get_time_seconds() << endl;
 
                                         /** to prevent further checking, we set limit_insertion to true */
                                         limit_insertion = true;
@@ -1524,8 +1538,12 @@ bool solver::workload_request()
                  * updating the number of groups to 1 to treat the history table as a single subspace
                  * and prevent the blocking and the deletion of the history table
                  */
-                mem_limit = 0.9;
-                number_of_groups = 1;
+                if (enable_heuristic)
+                {
+                    cout << "Start treating the history table as a single subspace" << endl;
+                    mem_limit = 0.9;
+                    number_of_groups = 1;
+                }
 
                 cout << "GLOBAL POOL EMPTY at time: " << main_timer.get_time_seconds() << endl;
                 gp_remaining = global_pool.size();

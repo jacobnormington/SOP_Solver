@@ -92,9 +92,10 @@ Let's consider a sequence of events happening sequentially, with `Restrict_Per` 
 
 #### Initial Setup:
 
-- Number_of_Buckets = 3
-- Bucket_size = 25
-- Restrict_Per = 0.9
+- Number_of_Buckets = 3 (number of split of history table)
+- Bucket_size = 25 (depth of the entries per bucket)
+- Restrict_Per = 0.9 (memory restriction)
+- Enable Heuristic = 1 (will treat 3 history table as a single history table)
 
 #### Memory Management Steps:
 
