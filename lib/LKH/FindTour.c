@@ -95,6 +95,7 @@ GainType FindTour()
                 best_cost = Cost;
                 printf("Best Cost = %lld Found by LKH in trail %d\n", Cost, Trial);
                 best_cost_temp = best_cost;
+                last_updated_at = 0;
                 BB_SolFound = false;
                 printf("Best Cost temp = %lld updated by LKH \n", best_cost_temp);
                 RecordBetterTour();

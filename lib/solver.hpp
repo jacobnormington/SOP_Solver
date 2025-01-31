@@ -167,7 +167,8 @@ private:
         lower_bound - the lower bound cost of a complete solution beginning with this path
         entry - a return variable, holds a pointer to the entry created, unless NULL is passed
         backtracked - if the subtree under this node has already been fully explored */
-    void push_to_history_table(Key &key, int lower_bound, HistoryNode **entry, bool backtracked, bool is_best_suffix);
+    void push_to_history_table(Key &key, int lower_bound, HistoryNode **entry, bool backtracked, bool is_best_suffix, int depth, int prefix_cost);
+
 
     /* returns true on success */
     bool workload_request();
