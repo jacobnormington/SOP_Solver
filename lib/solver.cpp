@@ -6,6 +6,7 @@ extern "C"
 }
 
 #define TABLE_SIZE 541065431 // number of buckets in the history table
+std::atomic<bool> isProcessingBestTour(false);
 
 //////Runtime Parameters (Read Only)/////
 // from command line arguments
@@ -21,7 +22,7 @@ static int global_pool_size = 0; // Minimum size of the global pool at before en
 static float inhis_mem_limit = -1; // 0-1, the percentage of memory usage beyond which new entries shouldn't be added to the history table
 static float mem_limit = -1;       // 0-1, the percentage of memory usage beyond which we will start blocking new entries into the table
 static int number_of_groups = 1;
-static int group_size = 50;
+static int bucket_size = 0;
 static bool is_all_table_blocked = false;
 // static unsigned int inhis_depth = -1;           //after inhis_mem_limit exceeded, will still add an entry if the current depth is less than inhis_depth
 // int exploitation_per;                        //percent of threads that should be devoted to searching already promising subspaces in thread restart, while 1 - exploitation_per percent are devoted to exploring new subspaces
@@ -30,6 +31,7 @@ static bool is_all_table_blocked = false;
 static bool enable_workstealing = false;
 static bool enable_threadstop = false;
 static bool enable_lkh = true;
+static bool enable_heuristic = false;
 // static bool enable_progress_estimation = false;
 
 // derived attributes
@@ -166,7 +168,7 @@ bool global_pool_sort(const path_node &src, const path_node &dest) { return src.
 bool local_pool_sort(const path_node &src, const path_node &dest) { return src.lower_bound > dest.lower_bound; }
 
 static double gp_const;    // store the total work in the global pool initially
-static double gp_complete; // variable to store the number of remaining work from global pool
+static double gp_remaining; // variable to store the number of remaining work from global pool
 
 void lkh()
 {
@@ -193,14 +195,14 @@ void print_diagnostics()
             diagnostics_lock.unlock();
             return;
         }
-        cout << main_timer.get_time_seconds() << endl;
+        std::cout << main_timer.get_time_seconds() << endl;
         local_pools->print();
         for (int i = 0; i < (int)work_remaining.size(); i++)
         {
-            cout << i << ": " << work_remaining[i] << ", ";
+            std::cout << i << ": " << work_remaining[i] << ", ";
         }
-        cout << endl;
-        cout << active_threads << endl;
+        std::cout << endl;
+        std::cout << active_threads << endl;
 
         diagonstics_targetTime = main_timer.get_time_seconds() + diagonstics_period;
         diagnostics_lock.unlock();
@@ -250,8 +252,9 @@ void solver::assign_parameter(vector<string> setting)
     number_of_groups = atoi(setting[12].c_str());
     std::cout << "Number of groups = " << number_of_groups << std::endl;
 
-    group_size = atoi(setting[13].c_str());
-    std::cout << "Group size in config = " << group_size << std::endl;
+    bucket_size = atoi(setting[13].c_str());
+    if (bucket_size > 0)
+        std::cout << "Group size in config = " << bucket_size << std::endl;
 
     if (number_of_groups - 1 >= 1)
         mem_limit = inhis_mem_limit - (number_of_groups - 1) * 0.1;
@@ -264,7 +267,34 @@ void solver::assign_parameter(vector<string> setting)
 
     return;
 }
+void print_workdone()
+{
+    cout << "gp const: " << gp_const << "\n";
+    cout << "gp remaining: " << gp_remaining << "\n";
 
+    long double total_work_done = 0; // work done in threads  // thread - work remaining
+    long double total_work_rem = 0;
+
+    // Calculate the total remaining work
+    for (const auto &work : work_remaining)
+    {
+        total_work_done += (1 - (static_cast<long double>(work.load()) / ULLONG_MAX));
+        total_work_rem += (static_cast<long double>(work.load()) / ULLONG_MAX);
+    }
+
+    std::cout << "Total Work done in threads: " << total_work_done << std::endl;
+    std::cout << "Total Work remaining in threads: " << total_work_rem << std::endl;
+
+    long double total_global_work_done = 0;
+    // Total global work done
+
+    total_global_work_done = gp_const - gp_remaining - 31 + total_work_done;
+
+    std::cout << "Total global work done: " << total_global_work_done << std::endl;
+    // Calculate the percentage of work done
+    long double percentage_done = (total_global_work_done / gp_const) * 100;
+    std::cout << "Percentage of work done: " << percentage_done << "%" << std::endl;
+}
 void solver::solve(string f_name, int thread_num)
 {
     if (thread_num < 1)
@@ -324,14 +354,23 @@ void solver::solve(string f_name, int thread_num)
             problem_state.depCnt[dependency_graph[i][k]]++;
         }
     }
-    group_size = instance_size / number_of_groups;
-    std::cout << "Group size after splitting instance size in 3 equal part = " << group_size << std::endl;
+
+    if (bucket_size == 0)
+    {
+        bucket_size = instance_size / number_of_groups;
+        std::cout << "Group size after splitting instance size in 3 equal part = " << bucket_size << std::endl;
+    }
+    else if (bucket_size * (number_of_groups - 1) >= instance_size - 2)
+    {
+        std::cout << "Exiting the code. Invalid bucket size" << endl;
+        exit(EXIT_FAILURE);
+    }
     default_state = problem_state; // a copy of problem_state, since structs are passed by value
     std::cout << "Instance size is " << instance_size - 2 << std::endl;
 
     // thread_load = new load_stats [thread_total];
     local_pools = new local_pool(thread_total);
-    history_table.initialize(thread_total, TABLE_SIZE, number_of_groups, group_size);
+    history_table.initialize(thread_total, TABLE_SIZE, number_of_groups, bucket_size);
     // thread_requests.resize(thread_total);
     // for (int i = 0; i < thread_total; ++i)
     // {
@@ -376,69 +415,41 @@ void solver::solve(string f_name, int thread_num)
     {
         enumerated_nodes_sum += enumerated_nodes[i];
     }
-    cout << "Total enumerated nodes: " << enumerated_nodes_sum << endl;
+    std::cout << "Total enumerated nodes: " << enumerated_nodes_sum << endl;
 
     auto total_time = chrono::duration_cast<std::chrono::microseconds>(end_time - start_time).count();
     std::cout << "------------------------" << thread_total << " thread"
               << "------------------------------" << std::endl;
-    cout << "thread stop requested: " << thread_stop_requested << "\n";
-    cout << "thread stop check: " << thread_stop_check << "\n";
-    cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
+    std::cout << "thread stop requested: " << thread_stop_requested << "\n";
+    std::cout << "thread stop check: " << thread_stop_check << "\n";
+    std::cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
 
-    cout << "Number of times LKH path was processed: " << numberOfTimesProcessed << endl;
+    std::cout << "Number of times LKH path was processed: " << numberOfTimesProcessed << endl;
 
     for (int i = 0; i < steal_success.size(); i++)
-        cout << steal_success[i] << ", ";
-    cout << endl;
+        std::cout << steal_success[i] << ", ";
+    std::cout << endl;
     for (int i = 0; i < steal_success.size(); i++)
-        cout << steal_attempts[i] << ", ";
-    cout << endl;
-    cout << "total work stolen: " << times_work_stolen << endl;
-    cout << "steal misses: " << steal_misses << endl;
+        std::cout << steal_attempts[i] << ", ";
+    std::cout << endl;
+    std::cout << "total work stolen: " << times_work_stolen << endl;
+    std::cout << "steal misses: " << steal_misses << endl;
 
     double percent_time_active = (((double)total_time / 1000000) * 32 - time_workstealing) / ((double)total_time / 1000000 * 32);
-    cout << "active time: " << percent_time_active << endl;
+    std::cout << "active time: " << percent_time_active << endl;
 
     std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
               << std::endl;
 
     for (int i = 0; i < steal_times.size(); i++)
     {
-        cout << steal_times[i] << endl;
+        std::cout << steal_times[i] << endl;
     }
+    print_workdone();
 
     // to count the number of entries at different level in history table and their references
     // history_table.track_entries_and_references();
 
-    /** uncomment the code below to find the work done in the global pool
-    cout << "gp const: " << gp_const << "\n";
-    cout << "gp temp: " << gp_complete << "\n";
-
-    long double total_work_done = 0; // work done in threads  // thread - work remaining
-    long double total_work_rem = 0;
-
-    // Calculate the total remaining work
-    for (const auto &work : work_remaining)
-    {
-        total_work_done += (1 - (static_cast<long double>(work.load()) / ULLONG_MAX));
-        total_work_rem += (static_cast<long double>(work.load()) / ULLONG_MAX);
-    }
-
-    std::cout << "Total Work done in threads: " << total_work_done << std::endl;
-    std::cout << "Total Work remaining in threads: " << total_work_rem << std::endl;
-
-    long double total_global_work_done = 0;
-    // Total global work done
-
-    total_global_work_done = gp_const - gp_complete - 31 + total_work_done;
-
-    std::cout << "Total global work done: " << total_global_work_done << std::endl;
-    // Calculate the percentage of work done
-    long double percentage_done = (total_global_work_done / gp_const) * 100;
-    std::cout << "Percentage of work done: " << percentage_done << "%" << std::endl;
-
-    std::cout << best_cost << "," << setprecision(4) << total_time / (float)(1000000) << std::endl
-              << std::endl;
 
     /** uncomment to print the pruning happening at each level
     // Print the data at each index
@@ -448,7 +459,7 @@ void solver::solve(string f_name, int thread_num)
         if (history_table_pruning_success[i] != 0)
         {
             total += history_table_pruning_success[i];
-            cout << "Index " << i << ": " << history_table_pruning_success[i] << endl;
+           std::cout << "Index " << i << ": " << history_table_pruning_success[i] << endl;
         }
     }
     */
@@ -474,8 +485,8 @@ void solver::solve(string f_name, int thread_num)
     // std::cout << "Cost of final solution is: " << total_cost << ", Reported: " << best_cost << std::endl << std::endl;
 
     // for (int i = 0; i < thread_total; i++) {
-    //     cout << "--------------------------------------------------------" << endl;
-    //     cout << "Thread " << i << ": Steal Count = " << steal_cnt[i] << endl;
+    //    std::cout << "--------------------------------------------------------" << endl;
+    //    std::cout << "Thread " << i << ": Steal Count = " << steal_cnt[i] << endl;
     //     //cout << "                    Wait Time = " << steal_wait[i] / (float)(1000000) << " s" << endl;
     //     //cout << "                    Local Pool Time = " << lp_time[i] / (float)(1000000) << " s" << endl;
     //     //cout << "                    Load Process Time 0 = " << proc_time[i][0] / (float)(1000000) << " s" << endl;
@@ -649,8 +660,8 @@ void solver::solve_parallel()
 
     history_table.update_gp_depth(global_pool.at(0).sequence.size());
     gp_const = global_pool.size();
-    gp_complete = global_pool.size();
-    // cout << "Setting the parameters to track the work done" << endl;
+    gp_remaining = global_pool.size();
+    // std::cout << "Setting the parameters to track the work done" << endl;
 
     delete solver_container;
     /* End Splitting Operation */
@@ -749,7 +760,7 @@ void solver::solve_parallel()
 
     if (time_out)
     {
-        cout << "instance timed out " << endl;
+        std::cout << "instance timed out " << endl;
     }
 
     return;
@@ -772,9 +783,9 @@ void solver::solve_parallel()
 //     // Only proceed if BB_SolFound is false
 //     if (BestCost > 0 && BestCost <= best_cost)
 //     {
-//         cout << "intiating localbest tour" << endl;
+//        std::cout << "intiating localbest tour" << endl;
 //         int *localBestTour = nullptr;
-//         // cout << "started processBestTour by thread : " << thread_id << " = " << endl;
+//         //std::cout << "started processBestTour by thread : " << thread_id << " = " << endl;
 //         // Lock Sol_lock to ensure LKH is not updating BestTour while we're copying it
 //         pthread_mutex_lock(&Sol_lock);
 //         if (BB_SolFound)
@@ -785,7 +796,7 @@ void solver::solve_parallel()
 //         // Check if the best cost has changed, meaning a new tour has been found
 //         if (BestCost < best_cost_temp)
 //         {
-//             cout << "updating best cost temp" << endl;
+//            std::cout << "updating best cost temp" << endl;
 //             // Update temporary cost and reset flag so this tour gets printed
 //             best_cost_temp = BestCost;
 //             isBestTourProcessed = false;
@@ -794,9 +805,9 @@ void solver::solve_parallel()
 //         // If the best tour is not processed yet, process it
 //         if (!isBestTourProcessed)
 //         {
-//             // cout << "Best Cost----: " << BestCost << endl;
-//             // cout << "Dimension: " << Dimension << endl;
-//             // cout << "instance_size: " << instance_size << endl;
+//             //std::cout << "Best Cost----: " << BestCost << endl;
+//             //std::cout << "Dimension: " << Dimension << endl;
+//             //std::cout << "instance_size: " << instance_size << endl;
 
 //             // Copy BestTour to a local variable
 //             // pthread_mutex_lock(&PrintLock);
@@ -827,7 +838,7 @@ void solver::solve_parallel()
 //         // Process the local copy of BestTour outside the critical section
 //         if (localBestTour != nullptr)
 //         {
-//             cout << "starting printing best tour by thread : " << thread_id << endl;
+//            std::cout << "starting printing best tour by thread : " << thread_id << endl;
 //             if (best_cost_temp == BestCost)
 //             {
 //                 std::cout << "Processing Best Tour with cost: " << best_cost_temp << std::endl;
@@ -844,9 +855,9 @@ void solver::solve_parallel()
 //             }
 //             // Clean up the local copy
 
-//             cout << "start cleaning up the local copy" << endl;
+//            std::cout << "start cleaning up the local copy" << endl;
 //             delete[] localBestTour;
-//             cout << "cleaned up the local copy" << endl;
+//            std::cout << "cleaned up the local copy" << endl;
 //         }
 //         else
 //             std::cout << "Best tour has already been processed by another thread: " << thread_id << std::endl;
@@ -898,9 +909,10 @@ void rotateTourToStartFromNode1(int *tour, int size)
 }
 void solver::processBestTour()
 {
+    std::cout << "intiating localbest tour" << endl;
+
     if (best_cost_temp == best_cost)
     {
-        pthread_mutex_lock(&PrintLock);
         // Lock Sol_lock to safely copy BestTour
         pthread_mutex_lock(&Sol_lock);
 
@@ -910,8 +922,6 @@ void solver::processBestTour()
             pthread_mutex_unlock(&PrintLock);
             return;
         }
-
-        cout << "intiating localbest tour" << endl;
 
         // Initialize variables for cost calculations
         int total_cost = best_cost_temp;
@@ -926,7 +936,7 @@ void solver::processBestTour()
         for (int i = 0; i <= instance_size; i++)
             localBestTour[i] = BestTour[i]; // Copy the tour
 
-        cout << "Processing Best Tour with cost: " << total_cost << std::endl;
+        std::cout << "Processing Best Tour with cost: " << total_cost << std::endl;
         numberOfTimesProcessed++;
         // Release Sol_lock after copying
         pthread_mutex_unlock(&Sol_lock);
@@ -949,13 +959,13 @@ void solver::processBestTour()
             prefix_cost += cost_graph[src][dst].weight;
             lkh_suffix_cost = total_cost - prefix_cost;
 
-            // cout << "Prefix Path (" << src << ", " << dst << "): ";
-            // for (int j = 0; j <= i; j++)
-            // {
-            //     cout << localBestTour[j] - 1 << " ";
-            // }
-            // cout << "| Prefix Cost: " << prefix_cost
-            //           << " | Remaining Cost: " << suffix_cost << std::endl;
+            // std::cout << "Prefix Path (" << src << ", " << dst << "): ";
+            //  for (int j = 0; j <= i; j++)
+            //  {
+            //     std::cout << localBestTour[j] - 1 << " ";
+            //  }
+            // std::cout << "| Prefix Cost: " << prefix_cost
+            //            << " | Remaining Cost: " << suffix_cost << std::endl;
 
             // Create the key with the size of the current prefix path
             pair<boost::dynamic_bitset<>, int> prefixKey = make_pair(bit_vector, src); // The second element is the last element of the prefix
@@ -970,8 +980,8 @@ void solver::processBestTour()
                 // Compare the prefix cost with the stored cost in the history table
                 if (content.prefix_cost > prefix_cost)
                 {
-                    // cout << "Prefix path (" << src << " to " << dst << ") is better than history. Current Cost: "
-                    //           << prefix_cost << ", History Cost: " << content.prefix_cost << std::endl;
+                    // std::cout << "Prefix path (" << src << " to " << dst << ") is better than history. Current Cost: "
+                    //            << prefix_cost << ", History Cost: " << content.prefix_cost << std::endl;
 
                     /**
                      * The suffix cost from the LKH is not equal to suffix lower bound in the history table
@@ -980,11 +990,11 @@ void solver::processBestTour()
                      * */
 
                     // if (suffix_cost > content.lower_bound - content.prefix_cost)
-                    //     cout << "worst lower bound" << endl;
+                    //    std::cout << "worst lower bound" << endl;
                     // else if (suffix_cost < content.lower_bound - content.prefix_cost)
-                    //     cout << "incorrect lower bound" << endl;
+                    //    std::cout << "incorrect lower bound" << endl;
                     // else
-                    //     cout << "correct lower bound" << endl;
+                    //    std::cout << "correct lower bound" << endl;
 
                     content.prefix_cost = prefix_cost; // Update the cost in the history table
                     /**
@@ -1005,17 +1015,17 @@ void solver::processBestTour()
             else
             {
                 push_to_history_table(prefixKey, -1, &history_node, false, false, i + 1, prefix_cost); // i+1 for depth because i starts from 0
-                // cout << "Prefix path (" << src << " to " << dst << ") is worse than history. Current Cost: "
-                //           << prefix_cost << ", History Cost: " << content.prefix_cost << std::endl;
+                // std::cout << "Prefix path (" << src << " to " << dst << ") is worse than history. Current Cost: "
+                //            << prefix_cost << ", History Cost: " << content.prefix_cost << std::endl;
             }
         }
 
         // else
         // {
-        //     cout << "Prefix path (" << src << " to " << dst << ") not found in the history table." << std::endl;
+        //    std::cout << "Prefix path (" << src << " to " << dst << ") not found in the history table." << std::endl;
         // }
-        cout << "Unlocked the PrintLock" << endl;
-        pthread_mutex_unlock(&PrintLock);
+        std::cout << "Unlocked the PrintLock" << endl;
+        isProcessingBestTour.store(false);
     }
 }
 
@@ -1029,26 +1039,30 @@ void solver::enumerate()
             if (last_updated_at == 0)
             {
                 last_updated_at = lkh_timer.get_time_seconds();
-                cout << "setting last updated at " << last_updated_at << endl;
+                std::cout << "setting last updated at " << last_updated_at << endl;
             }
             else
             {
-                // cout << "here " << endl;
+                // std::cout << "here " << endl;
                 if (lkh_timer.get_time_seconds() - last_updated_at > 100)
                 {
-                    // cout << "there" << endl;
-                    processBestTour();
+                    // If another thread is already processing, return immediately
+                    bool expected = false;
+                    if (isProcessingBestTour.compare_exchange_strong(expected, true))
+                    {
+                        processBestTour();
+                    }
                 }
             }
         }
-        // cout << "lkh timer: " << lkh_timer.get_time_seconds() << endl;
-        // cout << "main timer: " << lkh_timer.get_time_seconds() << endl;
-        // if (main_timer.get_time_seconds() > 10 && best_cost_temp != INT_MAX && !BB_SolFound)
-        // {
-        //     processBestTour();
-        // }
-        // if (main_timer.get_time_seconds() > 3598)
-        //     local_pools->print_top_sequence_sizes_end(thread_total);
+        // std::cout << "lkh timer: " << lkh_timer.get_time_seconds() << endl;
+        // std::cout << "main timer: " << lkh_timer.get_time_seconds() << endl;
+        //  if (main_timer.get_time_seconds() > 10 && best_cost_temp != INT_MAX && !BB_SolFound)
+        //  {
+        //      processBestTour();
+        //  }
+        //  if (main_timer.get_time_seconds() > 3598)
+        //      local_pools->print_top_sequence_sizes_end(thread_total);
 
         // PROGRESS variables
         int ready_node_count = 0;
@@ -1140,7 +1154,7 @@ void solver::enumerate()
                              */
 
                             history_table.free_subtable_memory(&mem_limit);
-                            cout << "Blocking Insertion at time is: " << main_timer.get_time_seconds() << endl;
+                            std::cout << "Blocking Insertion at time is: " << main_timer.get_time_seconds() << endl;
 
                             /** to prevent further checking, we set limit_insertion to true */
                             limit_insertion = true;
@@ -1160,13 +1174,12 @@ void solver::enumerate()
                                     bool is_space_increased_or_available = history_table.free_subtable_memory(&mem_limit);
                                     if (is_space_increased_or_available)
                                     {
-                                        if (problem_state.current_path.size() <= group_size)
+                                        if (problem_state.current_path.size() <= bucket_size)
                                             push_to_history_table(problem_state.history_key, lower_bound, &his_node, false, true, problem_state.current_path.size(), problem_state.current_cost);
                                     }
                                     else
                                     {
-                                        cout << "time is: " << main_timer.get_time_seconds() << endl;
-
+                                        std::cout << "time is: " << main_timer.get_time_seconds() << endl;
                                         /** to prevent further checking, we set limit_insertion to true */
                                         limit_insertion = true;
                                     }
@@ -1347,7 +1360,7 @@ void solver::retrieve_input()
         exit(EXIT_FAILURE);
     }
     else
-        cout << "Input file is " << filename << endl;
+        std::cout << "Input file is " << filename << endl;
 
     // Read input one line at a time, storing the matrix
     vector<vector<int>> file_matrix;
@@ -1516,7 +1529,7 @@ size_t solver::transitive_closure(vector<vector<int>> &isucc_graph)
 
     for (int i = 0; i < instance_size; i++)
     {
-        // cout << "current node is " << i << endl;
+        // std::cout << "current node is " << i << endl;
         transitive_closure_map[i][i] = true;
         dfs_queue.push_back(i);
         while (!dfs_queue.empty())
@@ -1608,7 +1621,7 @@ vector<int> solver::nearest_neighbor(vector<int> *partial_solution)
             std::cout << "current node is " << current_node << std::endl;
             for (auto node : sorted_costgraph[current_node])
             {
-                cout << node.dst << "," << visit_arr[node.dst] << "," << depCnt_arr[node.dst] << endl;
+                std::cout << node.dst << "," << visit_arr[node.dst] << "," << depCnt_arr[node.dst] << endl;
             }
             exit(EXIT_FAILURE);
         }
@@ -1702,7 +1715,7 @@ bool solver::enumeration_pre_check(path_node &active_node)
         //     active_node.his_entry->explored = true;
         // }
         // DIAGNOSTIC: view path
-        // cout << "at pre check Pruned node " << active_node.sequence.back() << endl;
+        // std::cout << "at pre check Pruned node " << active_node.sequence.back() << endl;
         return true;
     }
     return false;
@@ -1711,7 +1724,7 @@ bool solver::enumeration_pre_check(path_node &active_node)
 void solver::prune(int source_node, int taken_node)
 {
     // DIAGNOSTIC: view path
-    // cout << "Pruning node " << taken_node << endl;
+    // std::cout << "Pruning node " << taken_node << endl;
     //  if (enable_progress_estimation)
     //      estimated_trimmed_percent[thread_id] += dest.current_node_value; //add the value of this node you are trimming
 
@@ -1848,7 +1861,7 @@ bool solver::workload_request()
     if (work_remaining[thread_id] != 0)
     {
 
-        // cout << "ERROR!!! thread " << thread_id << " at workstealing with " << work_remaining[thread_id] << " work remaining" << endl;
+        // std::cout << "ERROR!!! thread " << thread_id << " at workstealing with " << work_remaining[thread_id] << " work remaining" << endl;
     }
     local_pools->set_pool_depth(thread_id, INT32_MAX);
     if (!global_pool.empty())
@@ -1868,12 +1881,16 @@ bool solver::workload_request()
                  * updating the number of groups to 1 to treat the history table as a single subspace
                  * and prevent the blocking and the deletion of the history table
                  */
-                mem_limit = 0.9;
-                number_of_groups = 1;
+                if (enable_heuristic)
+                {
+                    cout << "Start treating the history table as a single subspace" << endl;
+                    mem_limit = 0.9;
+                    number_of_groups = 1;
+                }
 
-                cout << "GLOBAL POOL EMPTY" << endl;
+                std::cout << "GLOBAL POOL EMPTY" << endl;
             } // updating the variable to track how many of the threads completed the work assigned to them from the primary subspace
-            gp_complete = global_pool.size();
+            gp_remaining = global_pool.size();
             global_pool_lock.unlock();
             return true;
         }
@@ -1970,9 +1987,9 @@ sop_state solver::generate_solver_state(path_node &subproblem)
     // solvers[thread_cnt].problem_state.initial_depth = solvers[thread_cnt].problem_state.cur_solution.size();
     // solvers[thread_cnt].problem_state.current_node_value = problem.current_node_value; //for progress estimation
 
-    // cout << "New SOP state" << std::endl;
-    // print_state(state);
-    // exit(EXIT_FAILURE);
+    // std::cout << "New SOP state" << std::endl;
+    //  print_state(state);
+    //  exit(EXIT_FAILURE);
 
     return state;
 }
@@ -2053,7 +2070,7 @@ bool solver::check_stop_request(std::pair<boost::dynamic_bitset<>, int> history_
             // }
             // else
             // {
-            //     cout << "thread id mismatch \n";
+            //    std::cout << "thread id mismatch \n";
             // }
             thread_requests[thread_id].lock.unlock();
         }
