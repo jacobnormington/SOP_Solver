@@ -7,6 +7,8 @@ extern "C"
 
 #define TABLE_SIZE 541065431 // number of buckets in the history table
 std::atomic<bool> isProcessingBestTour(false);
+// static int numberOfTimesBestSuffixEntryUpdated = 0;
+// static int numberOfTimesBestSuffixEntryAdded = 0;
 
 //////Runtime Parameters (Read Only)/////
 // from command line arguments
@@ -167,7 +169,7 @@ bool global_pool_sort(const path_node &src, const path_node &dest) { return src.
 // sort by decreasing lower bound (back is the best)
 bool local_pool_sort(const path_node &src, const path_node &dest) { return src.lower_bound > dest.lower_bound; }
 
-static double gp_const;    // store the total work in the global pool initially
+static double gp_const;     // store the total work in the global pool initially
 static double gp_remaining; // variable to store the number of remaining work from global pool
 
 void lkh()
@@ -425,6 +427,8 @@ void solver::solve(string f_name, int thread_num)
     std::cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
 
     std::cout << "Number of times LKH path was processed: " << numberOfTimesProcessed << endl;
+    // std::cout << "Number of times Best suffix entry added: " << numberOfTimesBestSuffixEntryAdded << endl;
+    // std::cout << "Number of times Best suffix entry updated: " << numberOfTimesBestSuffixEntryUpdated << endl;
 
     for (int i = 0; i < steal_success.size(); i++)
         std::cout << steal_success[i] << ", ";
@@ -449,7 +453,6 @@ void solver::solve(string f_name, int thread_num)
 
     // to count the number of entries at different level in history table and their references
     // history_table.track_entries_and_references();
-
 
     /** uncomment to print the pruning happening at each level
     // Print the data at each index
@@ -1014,6 +1017,7 @@ void solver::processBestTour()
             }
             else
             {
+                // numberOfTimesBestSuffixEntryAdded++;
                 push_to_history_table(prefixKey, -1, &history_node, false, false, i + 1, prefix_cost); // i+1 for depth because i starts from 0
                 // std::cout << "Prefix path (" << src << " to " << dst << ") is worse than history. Current Cost: "
                 //            << prefix_cost << ", History Cost: " << content.prefix_cost << std::endl;
@@ -1812,6 +1816,7 @@ bool solver::history_utilization(Key &key, int cost, int *lowerbound, bool *foun
          * since we don't have the best suffix lower bound, we will not consider any improvement logic here
          * whenever, we are updating the lower bound from B&B, we will set is_best_suffix to true
          */
+        // numberOfTimesBestSuffixEntryUpdated++;
         history_node->is_best_suffix = true;
         history_node->entry.store({cost, *lowerbound});
         *entry = history_node;
