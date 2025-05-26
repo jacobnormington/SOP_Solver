@@ -7,15 +7,15 @@ extern "C"
 
 #define TABLE_SIZE 541065431 // number of buckets in the history table
 std::atomic<bool> isProcessingBestTour(false);
-// static int numberOfTimesBestSuffixEntryUpdated = 0;
-// static int numberOfTimesBestSuffixEntryAdded = 0;
 
 //////Runtime Parameters (Read Only)/////
 // from command line arguments
 static string filename;      // name of the sop input file
 static int thread_total = 0; // number of threads to use for B&B enumeration (not counting the LKH thread)
 static bool limit_insertion = false;
-static int numberOfTimesProcessed = 0;
+static int numberOfTimesLKHPathProcessed = 0;
+// static int numberOfTimesBestSuffixEntryUpdated = 0;
+// static int numberOfTimesBestSuffixEntryAdded = 0;
 
 // from config file
 static int t_limit = 0;          // time limit, in seconds
@@ -426,7 +426,7 @@ void solver::solve(string f_name, int thread_num)
     std::cout << "thread stop check: " << thread_stop_check << "\n";
     std::cout << "thread stopped successfully: " << thread_stopped_successfully << "\n";
 
-    std::cout << "Number of times LKH path was processed: " << numberOfTimesProcessed << endl;
+    std::cout << "Number of times LKH path was processed: " << numberOfTimesLKHPathProcessed << endl;
     // std::cout << "Number of times Best suffix entry added: " << numberOfTimesBestSuffixEntryAdded << endl;
     // std::cout << "Number of times Best suffix entry updated: " << numberOfTimesBestSuffixEntryUpdated << endl;
 
@@ -940,7 +940,7 @@ void solver::processBestTour()
             localBestTour[i] = BestTour[i]; // Copy the tour
 
         std::cout << "Processing Best Tour with cost: " << total_cost << std::endl;
-        numberOfTimesProcessed++;
+        numberOfTimesLKHPathProcessed++;
         // Release Sol_lock after copying
         pthread_mutex_unlock(&Sol_lock);
         // Now print the copied tour
