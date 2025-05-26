@@ -111,4 +111,5 @@ This approach ensures that memory is managed efficiently by gradually restrictin
 ## Version
 
 - `version_1.0.0`: Branch before merging the history changes
+- `version_2.0.0`: Branch after merging the history changes
 - `main`: Latest branch with all the history changes merged into it
