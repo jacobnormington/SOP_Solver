@@ -75,7 +75,7 @@ typedef Node *(*MoveFunction) (Node * t1, Node * t2, GainType * G0,
 typedef int (*CostFunction) (Node * Na, Node * Nb);
 typedef GainType (*PenaltyFunction) (void);
 typedef GainType (*MergeTourFunction) (void);
-MergeTourFunction MergeWithTour;
+extern MergeTourFunction MergeWithTour;
 
 /* B&B variable*/
 extern pthread_mutex_t Sol_lock;

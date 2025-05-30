@@ -2,6 +2,20 @@
 #include "Segment.h"
 
 /*
+ * external global variables initialization
+ * values will be overwritten on runtime
+*/
+Node **t = NULL;
+Node **T = NULL;
+Node **tSaved = NULL;
+int *p = NULL;
+int *q = NULL;
+int *incl = NULL;
+int *cycle = NULL;
+GainType *G = NULL;
+int K = 0;
+
+/*
  * This file contains the functions FindPermutation and FeasibleKOptMove.
  */
 

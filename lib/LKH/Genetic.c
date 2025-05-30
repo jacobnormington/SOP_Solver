@@ -2,6 +2,18 @@
 #include "Genetic.h"
 
 /*
+ * external global variables initialization
+ * values will be overwritten on runtime
+*/
+int PopulationSize = 0;
+int MaxPopulationSize = 0;
+CrossoverFunction Crossover = NULL;
+int **Population = NULL;
+GainType *PenaltyFitness = NULL;
+GainType *Fitness = NULL;
+
+
+/*
  * The AddToPopulation function adds the current tour as an individual to 
  * the population. The fitness of the individual is set equal to the cost
  * of the tour. The population is kept sorted in increasing fitness order.

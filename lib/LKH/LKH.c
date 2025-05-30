@@ -1,5 +1,11 @@
 #include "LKH.h"
 
+/*
+ * external global variables initialization
+ * values will be overwritten on runtime
+*/
+MergeTourFunction MergeWithTour = NULL;
+
 /* All global variables of the problem. */
 
 int AscentCandidates;   /* Number of candidate edges to be associated
