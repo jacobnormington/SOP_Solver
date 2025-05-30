@@ -2,6 +2,7 @@
 #define TIMER_H
 #include <unordered_map>
 #include <chrono>
+#include <string>
 
 class timer
 {

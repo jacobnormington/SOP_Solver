@@ -11,6 +11,18 @@
 #include "LKH.h"
 #include "gpx.h"
 
+/*
+ * external global variables initialization
+ * values will be overwritten on runtime
+*/
+int n_cities = 0, n_cand = 0;
+int n_partitions_size2 = 0, n_partitions_before_fusion = 0,
+n_partitions_after_fusion1 = 0, n_partitions_after_fusion2 = 0,
+n_partitions_after_fusion3 = 0;
+int n_partitions_after_fusion4 = 0, n_partitions_after_fusion5 = 0,
+n_partitions_after_fusionB = 0;
+Node **Map2Node = NULL;
+
 // GPX2
 GainType gpx(int *solution_blue, int *solution_red, int *offspring)
 {

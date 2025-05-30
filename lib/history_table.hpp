@@ -2,6 +2,7 @@
 #define HASH_H
 
 #include <iostream>
+#include <list>
 
 #include <sys/sysinfo.h>
 
